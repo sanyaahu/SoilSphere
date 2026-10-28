@@ -16,10 +16,11 @@ type ESP32Reading = {
   temperature: number | null;
   humidity: number | null;
   lux: number | null;
+  oxygen: number | null;
+  moistureRaw: number | null;
 };
 
 export async function fetchReadings(): Promise<ReadingResponse> {
-  // Get existing readings (demo or backend)
   let result: ReadingResponse;
 
   if (!API_URL) {
@@ -39,7 +40,7 @@ export async function fetchReadings(): Promise<ReadingResponse> {
     result = (await response.json()) as ReadingResponse;
   }
 
-  // Fetch live CO2 and lux data from ESP32
+  // Fetch live readings from ESP32
   try {
     const response = await fetch(`${ESP32_URL}/sensors`);
 
@@ -51,22 +52,29 @@ export async function fetchReadings(): Promise<ReadingResponse> {
 
     const sensor: ESP32Reading = await response.json();
 
-    // Get the latest existing reading
     const latest = result.readings[result.readings.length - 1];
 
     if (!latest) return result;
 
-    // Combine existing fields with live ESP32 measurements
     const liveReading: SensorReading = {
       ...latest,
       deviceId: 'soilsphere-esp32',
       timestamp: new Date().toISOString(),
 
-      // Live CO2 sensor (SCD30)
+      // Live CO2
       co2Ppm: sensor.co2,
 
-      // Live light sensor (VEML7700)
+      // Live light
       lightLux: sensor.lux,
+
+      // Live oxygen
+      oxygenPercent: sensor.oxygen,
+
+      // Live raw soil moisture
+      moistureRaw: sensor.moistureRaw,
+
+      // No calibrated percentage available yet
+      moisturePercent: null,
     };
 
     return {
@@ -78,8 +86,6 @@ export async function fetchReadings(): Promise<ReadingResponse> {
     };
   } catch (error) {
     console.log('ESP32 connection failed:', error);
-
-    // Keep existing readings if ESP32 is unreachable
     return result;
   }
 }

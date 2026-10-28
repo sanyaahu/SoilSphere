@@ -193,9 +193,9 @@ function Overview({
       <View style={s.grid}>
         <Metric
           icon="◒"
-          label="Soil moisture"
-          value={reading.moisturePercent}
-          unit="%"
+          label="Soil moisture (raw)"
+          value={reading.moistureRaw ?? null}
+          unit="ADC"
         />
         <Metric
           icon="☼"
@@ -312,9 +312,9 @@ function Trends({ readings }: { readings: SensorReading[] }) {
         tint="#E3B47E"
       />
       <TrendCard
-        label="Moisture"
-        unit="%"
-        values={readings.map((r) => r.moisturePercent)}
+        label="Moisture (raw ADC)"
+        unit="ADC"
+        values={readings.map((r) => r.moistureRaw ?? null)}
         tint="#6EA8B2"
       />
 
