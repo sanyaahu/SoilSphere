@@ -162,7 +162,7 @@ function Overview({
         </View>
       </Card>
 
-      <Heading title="Nutrients" note="Estimated NPK readings" />
+      <Heading title="Nutrients" note="Latest NPK readings" />
       <Card>
         <View style={s.row}>
           <Nutrient
