@@ -93,5 +93,35 @@ export async function fetchReadings(): Promise<ReadingResponse> {
   }
 }
 
-// Keep the rest of your existing API functions
-// (such as sendChatMessage) unchanged.
+export async function askAdvisor(
+  message: string,
+  history: ChatMessage[],
+  readings: SensorReading[]
+): Promise<string> {
+  if (!API_URL) {
+    return 'This is a preview. Set EXPO_PUBLIC_API_URL and start the local server to ask questions about sensor readings.';
+  }
+
+  // Only send history from the same device as the latest reading,
+  // so demo samples don't get mixed into live ESP32 trends.
+  const latest = readings[readings.length - 1];
+  const recent = readings
+    .filter((r) => r.deviceId === latest?.deviceId)
+    .slice(-12);
+
+  const response = await fetch(`${API_URL}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, history, readings: recent }),
+  });
+
+  const body = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      body.error || `Advisor request failed (${response.status})`
+    );
+  }
+
+  return body.reply;
+}

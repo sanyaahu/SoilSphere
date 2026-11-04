@@ -1,10 +1,13 @@
 
-import { useCallback, useEffect, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
+  ScrollViewInstance,
   StatusBar,
   StyleSheet,
   Text,
@@ -16,6 +19,7 @@ import { askAdvisor, fetchReadings } from './src/api';
 import { ChatMessage, demoReadings, display, SensorReading } from './src/data';
 import { getInsights } from './src/recommendations';
 import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export type Tab = 'Overview' | 'Trends' | 'Advisor' | 'Device';
 
@@ -339,15 +343,29 @@ function Trends({ readings }: { readings: SensorReading[] }) {
 }
 
 function Advisor({
-  reading,
   readings,
+  refreshControl,
 }: {
-  reading: SensorReading;
   readings: SensorReading[];
+  refreshControl: ReactElement<React.ComponentProps<typeof RefreshControl>>;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const scroll = useRef<ScrollViewInstance>(null);
+
+  // Keep the newest message in view when replies arrive or the keyboard opens.
+  const scrollToEnd = useCallback(
+    () => setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 50),
+    []
+  );
+  useEffect(() => {
+    if (messages.length || busy) scrollToEnd();
+  }, [messages, busy, scrollToEnd]);
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', scrollToEnd);
+    return () => sub.remove();
+  }, [scrollToEnd]);
 
   async function send(text = draft) {
     const prompt = text.trim();
@@ -360,7 +378,7 @@ function Advisor({
     setBusy(true);
 
     try {
-      const reply = await askAdvisor(prompt, history, reading);
+      const reply = await askAdvisor(prompt, history, readings);
       setMessages((current) => [
         ...current,
         { role: 'assistant', content: reply },
@@ -381,6 +399,16 @@ function Advisor({
 
   return (
     <>
+      <ScrollView
+        ref={scroll}
+        style={{ flex: 1 }}
+        contentContainerStyle={s.content}
+        refreshControl={refreshControl}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+      >
+      <Text style={s.pageLabel}>Advisor</Text>
+
       <View style={s.advisorHero}>
         <Text style={s.advisorStar}>✦</Text>
         <Text style={s.advisorTitle}>Ask SoilSphere</Text>
@@ -438,7 +466,9 @@ function Advisor({
           style={{ margin: 12 }}
         />
       )}
+      </ScrollView>
 
+      {/* Pinned outside the scroll area so it rides on top of the keyboard. */}
       <View style={s.inputRow}>
         <TextInput
           style={s.input}
@@ -627,14 +657,36 @@ export default function App({
     };
   }, []);
 
+  // Hide the tab bar while typing so the input sits directly above the keyboard.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => setKeyboardOpen(true)
+    );
+    const hide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardOpen(false)
+    );
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
   const reading = readings[readings.length - 1];
 
+  const refreshControl = (
+    <RefreshControl
+      refreshing={refreshing}
+      onRefresh={refresh}
+      tintColor={color.green}
+    />
+  );
+
   return (
-    <SafeAreaView style={s.safe}>
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor={color.bg}
-      />
+    <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle="dark-content" />
 
       <View style={s.top}>
         <View style={s.logoRow}>
@@ -651,16 +703,17 @@ export default function App({
         </Text>
       </View>
 
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior="padding"
+      >
+      {tab === 'Advisor' ? (
+        <Advisor readings={readings} refreshControl={refreshControl} />
+      ) : (
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={s.content}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={refresh}
-            tintColor={color.green}
-          />
-        }
+        refreshControl={refreshControl}
         keyboardShouldPersistTaps="handled"
       >
         <Text style={s.pageLabel}>{tab}</Text>
@@ -673,11 +726,6 @@ export default function App({
           />
         ) : tab === 'Trends' ? (
           <Trends readings={readings} />
-        ) : tab === 'Advisor' ? (
-          <Advisor
-            reading={reading}
-            readings={readings}
-          />
         ) : (
           <Device
             reading={reading}
@@ -687,8 +735,10 @@ export default function App({
           />
         )}
       </ScrollView>
+      )}
 
-      <View style={s.tabbar}>
+      {!keyboardOpen && (
+      <SafeAreaView edges={['bottom']} style={s.tabbar}>
         {tabs.map(([name, icon]) => (
           <TouchableOpacity
             key={name}
@@ -715,7 +765,9 @@ export default function App({
             </Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </SafeAreaView>
+      )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -1060,8 +1112,12 @@ const s = StyleSheet.create({
   inputRow: {
     flexDirection: 'row',
     gap: 9,
-    marginTop: 16,
     alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: color.bg,
+    borderTopWidth: 1,
+    borderTopColor: color.line,
   },
   input: {
     flex: 1,
@@ -1126,7 +1182,7 @@ const s = StyleSheet.create({
     marginTop: 8,
   },
   tabbar: {
-    height: 70,
+    minHeight: 70,
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: color.line,
