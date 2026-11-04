@@ -24,6 +24,7 @@ import { ModelPanel } from './src/components/ModelPanel';
 import { MoistureCalibration } from './src/components/MoistureCalibration';
 import { calibratedReading } from './src/ml/moisture';
 import { useSoilSettings } from './src/state/soil-settings';
+import { WeatherCard } from './src/components/WeatherCard';
 
 export type Tab = 'Overview' | 'Trends' | 'Advisor' | 'Device' | 'Model';
 
@@ -137,6 +138,8 @@ function Overview({
 }) {
   return (
     <>
+      <WeatherCard />
+
       <View style={s.hero}>
         <Text style={s.kicker}>GOOD MORNING, GARDENER</Text>
         <Text style={s.heroTitle}>Your soil, made simple.</Text>
