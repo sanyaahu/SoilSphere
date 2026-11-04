@@ -41,3 +41,7 @@ yarn-error.*
 /android
 .env
 server/.env
+ml/.venv/
+ml/**/__pycache__/
+ml/artifacts/*.joblib
+ml/data/sensor_readings*.csv

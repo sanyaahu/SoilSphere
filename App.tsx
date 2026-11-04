@@ -8,7 +8,6 @@ import {
   RefreshControl,
   ScrollView,
   ScrollViewInstance,
-  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -20,8 +19,13 @@ import { ChatMessage, demoReadings, display, SensorReading } from './src/data';
 import { getInsights } from './src/recommendations';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import { ModelPanel } from './src/components/ModelPanel';
+import { MoistureCalibration } from './src/components/MoistureCalibration';
+import { calibratedReading } from './src/ml/moisture';
+import { useSoilSettings } from './src/state/soil-settings';
 
-export type Tab = 'Overview' | 'Trends' | 'Advisor' | 'Device';
+export type Tab = 'Overview' | 'Trends' | 'Advisor' | 'Device' | 'Model';
 
 const color = {
   bg: '#F6F7F1',
@@ -38,6 +42,7 @@ const tabs: [Tab, string][] = [
   ['Overview', '⌂'],
   ['Trends', '▥'],
   ['Advisor', '✦'],
+  ['Model', '◈'],
   ['Device', '◉'],
 ];
 
@@ -197,9 +202,9 @@ function Overview({
       <View style={s.grid}>
         <Metric
           icon="◒"
-          label="Soil moisture (raw)"
-          value={reading.moistureRaw ?? null}
-          unit="ADC"
+          label={reading.moistureCalibrationId ? 'Relative soil moisture' : reading.moisturePercent !== null ? 'Soil moisture' : 'Soil moisture (raw)'}
+          value={reading.moisturePercent ?? reading.moistureRaw ?? null}
+          unit={reading.moisturePercent !== null ? '%' : 'ADC'}
         />
         <Metric
           icon="☼"
@@ -316,9 +321,9 @@ function Trends({ readings }: { readings: SensorReading[] }) {
         tint="#E3B47E"
       />
       <TrendCard
-        label="Moisture (raw ADC)"
-        unit="ADC"
-        values={readings.map((r) => r.moistureRaw ?? null)}
+        label={readings.at(-1)?.moistureCalibrationId ? 'Relative moisture' : 'Moisture (raw ADC)'}
+        unit={readings.at(-1)?.moistureCalibrationId ? '%' : 'ADC'}
+        values={readings.map((r) => r.moistureCalibrationId ? r.moisturePercent : r.moistureRaw ?? null)}
         tint="#6EA8B2"
       />
 
@@ -490,11 +495,13 @@ function Advisor({
 function Device({
   reading,
   demo,
+  stale,
   refresh,
   error,
 }: {
   reading: SensorReading;
   demo: boolean;
+  stale: boolean;
   refresh: () => void;
   error: string | null;
 }) {
@@ -514,7 +521,7 @@ function Device({
               { color: demo ? color.amber : color.green },
             ]}
           >
-            {demo ? 'Demo mode' : 'Live'}
+            {demo ? 'Demo mode' : stale ? 'Last received' : 'Live'}
           </Text>
         </View>
 
@@ -537,6 +544,8 @@ function Device({
       <TouchableOpacity style={s.refresh} onPress={refresh}>
         <Text style={s.refreshText}>Refresh readings</Text>
       </TouchableOpacity>
+
+      <MoistureCalibration deviceId={reading.deviceId} live={!demo && !stale} />
 
       <Card style={{ marginTop: 20 }}>
         <Text style={s.cardTitle}>Connecting hardware</Text>
@@ -573,11 +582,14 @@ export default function App({
             | '/advisor'
             | '/trends'
             | '/device'
+            | '/model'
     );
 
   const [readings, setReadings] =
     useState<SensorReading[]>(demoReadings);
   const [demo, setDemo] = useState(true);
+  const [stale, setStale] = useState(false);
+  const settings = useSoilSettings();
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -597,7 +609,8 @@ export default function App({
 
       setReadings(data.readings);
       setDemo(data.mode === 'demo');
-      setError(null);
+      setStale(!!data.stale);
+      setError(data.stale ? 'Device disconnected. Showing the last received reading.' : null);
     } catch (e) {
       setError(
         e instanceof Error
@@ -629,7 +642,8 @@ export default function App({
         ) {
           setReadings(data.readings);
           setDemo(data.mode === 'demo');
-          setError(null);
+          setStale(!!data.stale);
+          setError(data.stale ? 'Device disconnected. Showing the last received reading.' : null);
         }
       } catch (e) {
         if (active) {
@@ -674,7 +688,8 @@ export default function App({
     };
   }, []);
 
-  const reading = readings[readings.length - 1];
+  const calibrated = demo ? readings : readings.map(value => calibratedReading(value, settings.calibration));
+  const reading = calibrated[calibrated.length - 1];
 
   const refreshControl = (
     <RefreshControl
@@ -686,7 +701,7 @@ export default function App({
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'left', 'right']}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar style="dark" />
 
       <View style={s.top}>
         <View style={s.logoRow}>
@@ -699,7 +714,7 @@ export default function App({
           </Text>
         </View>
         <Text style={s.topState}>
-          {demo ? '● Preview' : '● Connected'}
+          {demo ? '● Preview' : stale ? '● Last reading' : '● Connected'}
         </Text>
       </View>
 
@@ -708,7 +723,7 @@ export default function App({
         behavior="padding"
       >
       {tab === 'Advisor' ? (
-        <Advisor readings={readings} refreshControl={refreshControl} />
+        <Advisor readings={calibrated} refreshControl={refreshControl} />
       ) : (
       <ScrollView
         style={{ flex: 1 }}
@@ -725,11 +740,14 @@ export default function App({
             onAdvisor={() => go('Advisor')}
           />
         ) : tab === 'Trends' ? (
-          <Trends readings={readings} />
+          <Trends readings={calibrated} />
+        ) : tab === 'Model' ? (
+          <ModelPanel reading={reading} demo={demo} stale={stale} />
         ) : (
           <Device
             reading={reading}
             demo={demo}
+            stale={stale}
             refresh={refresh}
             error={error}
           />

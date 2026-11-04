@@ -1,2 +1,3 @@
 import { Stack } from 'expo-router';
-export default function RootLayout() { return <Stack screenOptions={{ headerShown: false, animation: 'none' }} />; }
+import { SoilSettingsProvider } from '../state/soil-settings';
+export default function RootLayout() { return <SoilSettingsProvider><Stack screenOptions={{ headerShown: false, animation: 'none' }} /></SoilSettingsProvider>; }

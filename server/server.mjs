@@ -11,8 +11,9 @@ let anthropic;
 const liveReadings = [];
 const fields = {
   nitrogenMgKg: 2999, phosphorusMgKg: 2999, potassiumMgKg: 2999,
-  moisturePercent: 100, moistureRaw: 4095, lightLux: 140000, co2Ppm: 10000,
+  moisturePercent: 100, lightLux: 140000, co2Ppm: 10000,
   oxygenPercent: 25, batteryPercent: 100,
+  moistureRaw: 4095, temperatureC: 100, humidityPercent: 100,
 };
 const demoValues = [[41,28,62,30,28000,620,20.4,86],[42,29,60,31,35000,650,20.2,86],[40,31,61,33,42000,690,20.1,85],[39,30,59,32,31000,680,20.1,85],[38,32,58,34,37000,710,19.9,84],[38,32,58,34,39000,720,19.8,84]];
 const demoReadings = demoValues.map((v,i)=>({
@@ -33,7 +34,8 @@ export function validateReading(input) {
   const result={deviceId:input.deviceId,timestamp:new Date(input.timestamp).toISOString()};
   for(const [field,max] of Object.entries(fields)) {
     const value=input[field];
-    if(value!==null && value!==undefined && (typeof value!=='number'||!Number.isFinite(value)||value<0||value>max)) throw new Error('Invalid '+field);
+    const min=field==='temperatureC'?-40:0;
+    if(value!==null && value!==undefined && (typeof value!=='number'||!Number.isFinite(value)||value<min||value>max)) throw new Error('Invalid '+field);
     result[field]=value ?? null;
   }
   return result;
@@ -100,7 +102,8 @@ export function createServer() {
         const input=await body(req);
         if(typeof input.message!=='string' || !input.message.trim() || input.message.length>1000) return send(res,400,{error:'Invalid message'});
         // Prefer what the phone is showing (it reads the ESP32 directly); fall back to server-side readings.
-        const sent=(Array.isArray(input.readings)?input.readings:[]).slice(-12).flatMap(r=>{ try { return [validateReading(r)]; } catch { return []; } });
+        const fromPhone=Array.isArray(input.readings)?input.readings:input.reading?[input.reading]:[];
+        const sent=fromPhone.slice(-12).flatMap(r=>{ try { return [validateReading(r)]; } catch { return []; } });
         const reading=sent.at(-1)||liveReadings.at(-1)||demoReadings.at(-1);
         try {
           const reply=await aiReply(input.message,Array.isArray(input.history)?input.history:[],reading,sent.length?sent:liveReadings.slice(-12));
