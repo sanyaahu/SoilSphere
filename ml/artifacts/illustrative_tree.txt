@@ -1,0 +1,18 @@
+Illustrative shallow tree, NOT the deployed classifier. Dataset scales; units unspecified.
+
+|--- nitrogen <= 30.77
+|   |--- phosphorus <= 25.47
+|   |   |--- potassium <= 8.26
+|   |   |   |--- class: 20-20
+|   |   |--- potassium >  8.26
+|   |   |   |--- class: 10-26-26
+|   |--- phosphorus >  25.47
+|   |   |--- potassium <= 4.72
+|   |   |   |--- class: DAP
+|   |   |--- potassium >  4.72
+|   |   |   |--- class: 14-35-14
+|--- nitrogen >  30.77
+|   |--- phosphorus <= 15.37
+|   |   |--- class: Urea
+|   |--- phosphorus >  15.37
+|   |   |--- class: 28-28

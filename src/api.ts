@@ -1,97 +1,53 @@
 
-import {
-  ChatMessage,
-  demoReadings,
-  ReadingResponse,
-  SensorReading,
-} from './data';
+import { ChatMessage, demoReadings, ReadingResponse, SensorReading } from './data';
+import { mapEsp32Reading } from './sensor-mapping';
+import { getInsights } from './recommendations';
 
-const API_URL =
-  process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '');
+const API_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '');
+const ESP32_URL = (process.env.EXPO_PUBLIC_ESP32_URL || 'http://172.26.160.8').replace(/\/$/, '');
+let liveHistory: SensorReading[] = [];
 
-const ESP32_URL = 'http://172.26.160.8';
-
-// All readings returned by the ESP32
-type ESP32Reading = {
-  co2: number | null;
-  temperature: number | null;
-  humidity: number | null;
-  lux: number | null;
-  oxygen: number | null;
-  moistureRaw: number | null;
-  nitrogen: number | null;
-  phosphorus: number | null;
-  potassium: number | null;
-};
-
-export async function fetchReadings(): Promise<ReadingResponse> {
-  let result: ReadingResponse;
-
-  // Get existing backend/demo readings
-  if (!API_URL) {
-    result = {
-      mode: 'demo',
-      readings: demoReadings,
-    };
-  } else {
-    const response = await fetch(`${API_URL}/readings`);
-
-    if (!response.ok) {
-      throw new Error(
-        `Readings request failed (${response.status})`
-      );
-    }
-
-    result = (await response.json()) as ReadingResponse;
-  }
-
-  // Fetch live ESP32 readings
+async function request(url: string, options: RequestInit = {}, timeoutMs = 2500) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(`${ESP32_URL}/sensors`);
-
-    if (!response.ok) {
-      throw new Error(
-        `ESP32 request failed (${response.status})`
-      );
-    }
-
-    const sensor = (await response.json()) as ESP32Reading;
-
-    const liveReading: SensorReading = {
-      deviceId: 'SoilSphere-ESP32',
-      timestamp: new Date().toISOString(),
-
-      // NPK
-      nitrogenMgKg: sensor.nitrogen,
-      phosphorusMgKg: sensor.phosphorus,
-      potassiumMgKg: sensor.potassium,
-
-      // Moisture (raw, not calibrated yet)
-      moisturePercent: null,
-      moistureRaw: sensor.moistureRaw,
-
-      // Light
-      lightLux: sensor.lux,
-
-      // CO2
-      co2Ppm: sensor.co2,
-
-      // Oxygen
-      oxygenPercent: sensor.oxygen,
-
-      // Battery monitoring not implemented yet
-      batteryPercent: null,
-    };
-
-    return {
-      mode: 'live',
-      readings: [...result.readings, liveReading],
-    };
-  } catch (error) {
-    console.warn('Could not fetch ESP32 readings:', error);
-    return result;
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    if (!response.ok) throw new Error(`Request failed (${response.status})`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-// Keep the rest of your existing API functions
-// (such as sendChatMessage) unchanged.
+export async function fetchReadings(): Promise<ReadingResponse> {
+  const [backend, hardware] = await Promise.allSettled([
+    API_URL ? request(`${API_URL}/readings`) : Promise.resolve(null),
+    request(`${ESP32_URL}/sensors`),
+  ]);
+  if (hardware.status === 'fulfilled') {
+    const reading = mapEsp32Reading(hardware.value);
+    if (reading) {
+      liveHistory = [...liveHistory, reading].slice(-100);
+      return { mode: 'live', readings: liveHistory };
+    }
+  }
+  if (backend.status === 'fulfilled' && backend.value?.mode === 'live' && Array.isArray(backend.value.readings) && backend.value.readings.length) {
+    liveHistory = backend.value.readings;
+    return { mode: 'live', readings: liveHistory };
+  }
+  if (liveHistory.length) return { mode: 'live', readings: liveHistory, stale: true };
+  return { mode: 'demo', readings: demoReadings };
+}
+
+export async function askAdvisor(message: string, history: ChatMessage[], reading: SensorReading): Promise<string> {
+  if (API_URL) {
+    const data = await request(`${API_URL}/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, history, reading }),
+    }, 20000);
+    if (typeof data.reply !== 'string') throw new Error('The advisor returned no reply.');
+    return data.reply;
+  }
+  const summary = `Latest NPK estimates: N ${reading.nitrogenMgKg ?? 'unavailable'}, P ${reading.phosphorusMgKg ?? 'unavailable'}, K ${reading.potassiumMgKg ?? 'unavailable'} mg/kg.`;
+  return `${summary} ${getInsights([reading])[0].detail}`;
+}

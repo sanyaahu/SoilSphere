@@ -9,6 +9,9 @@ export type SensorReading = {
 
   moisturePercent: number | null;
   moistureRaw?: number | null;
+  temperatureC?: number | null;
+  humidityPercent?: number | null;
+  moistureCalibrationId?: string | null;
 
   lightLux: number | null;
   co2Ppm: number | null;
@@ -24,6 +27,7 @@ export type ChatMessage = {
 export type ReadingResponse = {
   mode: 'demo' | 'live';
   readings: SensorReading[];
+  stale?: boolean;
 };
 
 const values = [
@@ -59,4 +63,4 @@ export const demoReadings: SensorReading[] = values.map(
 export const display = (
   v: number | null,
   digits = 0
-) => v === null ? '—' : v.toFixed(digits);
+) => v === null || v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(digits);

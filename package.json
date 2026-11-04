@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "^58.0.19",
     "expo-constants": "~58.0.13",
     "expo-linking": "~58.0.14",
@@ -26,6 +27,7 @@
     "start": "expo start",
     "api": "node server/server.mjs",
     "test:api": "node --test server/server.test.mjs",
+    "test:ml": "node --experimental-strip-types --test server/ml.test.mjs",
     "typecheck": "tsc --noEmit",
     "android": "expo start --android",
     "ios": "expo start --ios",

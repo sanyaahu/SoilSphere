@@ -1,0 +1,12 @@
+{
+  "input_source": "reference_example",
+  "readings": {
+    "temperature": 26.0,
+    "humidity": 52.0,
+    "moisture": 38.0,
+    "soil_type": "Sandy",
+    "nitrogen": 37.0,
+    "potassium": 0.0,
+    "phosphorus": 0.0
+  }
+}

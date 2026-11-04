@@ -1,0 +1,262 @@
+{
+  "task": "fertilizer_classification_not_soil_health",
+  "source_rows": 599,
+  "train_rows": 479,
+  "test_rows": 120,
+  "seed": 42,
+  "source_sha256": "2c4cf95cc906c2338579b093c1e34f64249949db5f2b17af0b52f57bdeed2f3f",
+  "sklearn_version": "1.7.2",
+  "validation_5_fold_on_training_only": {
+    "majority_baseline": {
+      "accuracy": {
+        "mean": 0.22964912280701752,
+        "std": 0.0009649122807017574
+      },
+      "balanced_accuracy": {
+        "mean": 0.14285714285714285,
+        "std": 0.0
+      }
+    },
+    "upstream_style_tree": {
+      "accuracy": {
+        "mean": 0.7933552631578947,
+        "std": 0.038456159359388314
+      },
+      "balanced_accuracy": {
+        "mean": 0.7675923096511331,
+        "std": 0.03604526393302114
+      }
+    },
+    "moisture_only": {
+      "accuracy": {
+        "mean": 0.2379385964912281,
+        "std": 0.031477129351432806
+      },
+      "balanced_accuracy": {
+        "mean": 0.21072077315774793,
+        "std": 0.0336650673724514
+      }
+    },
+    "nutrients_only": {
+      "accuracy": {
+        "mean": 0.8434429824561402,
+        "std": 0.011144019633501841
+      },
+      "balanced_accuracy": {
+        "mean": 0.8078747862781477,
+        "std": 0.03330639656424742
+      }
+    },
+    "sensors_only": {
+      "accuracy": {
+        "mean": 0.8496271929824563,
+        "std": 0.02558183357961596
+      },
+      "balanced_accuracy": {
+        "mean": 0.8213660009458328,
+        "std": 0.03272727937400255
+      }
+    },
+    "combined_with_soil": {
+      "accuracy": {
+        "mean": 0.8662938596491229,
+        "std": 0.037939775359435206
+      },
+      "balanced_accuracy": {
+        "mean": 0.8458899923605806,
+        "std": 0.03920798369449442
+      }
+    }
+  },
+  "selected_model": "combined_with_soil",
+  "held_out_test": {
+    "accuracy": 0.95,
+    "balanced_accuracy": 0.9567669172932332,
+    "class_order": [
+      "10-26-26",
+      "14-35-14",
+      "17-17-17",
+      "20-20",
+      "28-28",
+      "DAP",
+      "Urea"
+    ],
+    "confusion_matrix": [
+      [
+        8,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        18,
+        0,
+        0,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        6,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        17,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        4,
+        15,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        22,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        28
+      ]
+    ],
+    "per_class": {
+      "10-26-26": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 8.0
+      },
+      "14-35-14": {
+        "precision": 1.0,
+        "recall": 0.9473684210526315,
+        "f1-score": 0.972972972972973,
+        "support": 19.0
+      },
+      "17-17-17": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 6.0
+      },
+      "20-20": {
+        "precision": 0.8095238095238095,
+        "recall": 1.0,
+        "f1-score": 0.8947368421052632,
+        "support": 17.0
+      },
+      "28-28": {
+        "precision": 1.0,
+        "recall": 0.75,
+        "f1-score": 0.8571428571428571,
+        "support": 20.0
+      },
+      "DAP": {
+        "precision": 0.9166666666666666,
+        "recall": 1.0,
+        "f1-score": 0.9565217391304348,
+        "support": 22.0
+      },
+      "Urea": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 28.0
+      },
+      "accuracy": 0.95,
+      "macro avg": {
+        "precision": 0.9608843537414966,
+        "recall": 0.9567669172932332,
+        "f1-score": 0.954482058764504,
+        "support": 120.0
+      },
+      "weighted avg": {
+        "precision": 0.9577380952380952,
+        "recall": 0.95,
+        "f1-score": 0.9490279017166888,
+        "support": 120.0
+      }
+    }
+  },
+  "features": [
+    "temperature",
+    "humidity",
+    "moisture",
+    "nitrogen",
+    "potassium",
+    "phosphorus",
+    "soil_type"
+  ],
+  "excluded_inputs": [
+    "crop_type"
+  ],
+  "training_ranges": {
+    "temperature": {
+      "min": 22.644855511555093,
+      "max": 40.32400125538759
+    },
+    "humidity": {
+      "min": 44.62043406611748,
+      "max": 73.63346492390787
+    },
+    "moisture": {
+      "min": 20.25496269470415,
+      "max": 69.63258963488428
+    },
+    "nitrogen": {
+      "min": 0.0,
+      "max": 49.01897467437576
+    },
+    "potassium": {
+      "min": 0.0,
+      "max": 29.49401941538801
+    },
+    "phosphorus": {
+      "min": 0.0,
+      "max": 49.69869585284838
+    }
+  },
+  "categories": {
+    "soil_type": [
+      "Black",
+      "Clayey",
+      "Loamy",
+      "Red",
+      "Sandy"
+    ]
+  },
+  "limitations": [
+    "No healthy/unhealthy, nutrient-excess, or no-fertilizer-needed labels.",
+    "NPK and moisture measurement units/methods are not specified by upstream.",
+    "Random row holdout: no pot/site/time metadata to test independent sites.",
+    "Dataset-only performance does not establish sensor or field accuracy.",
+    "Feature ablations assess predictive value; they do not prove interactions or causality.",
+    "No CO2 or oxygen training features."
+  ]
+}
