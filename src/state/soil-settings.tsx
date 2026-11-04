@@ -2,16 +2,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { MoistureCalibration } from '../ml/types';
 import type { TrainingSample } from '../ml/samples';
+import { DEFAULT_ESP32_URL, normalizeDeviceUrl } from '../device-connection';
 
-type Settings = { calibration: MoistureCalibration | null; samples: TrainingSample[] };
+type Settings = { calibration: MoistureCalibration | null; samples: TrainingSample[]; deviceUrl: string };
 type SoilContext = Settings & {
   ready: boolean;
   error: string | null;
   saveCalibration: (value: MoistureCalibration) => Promise<void>;
   saveSample: (value: TrainingSample) => Promise<void>;
+  saveDeviceUrl: (value: string) => Promise<void>;
 };
 const key = 'soilsphere.capstone.samples.v1';
-const defaults: Settings = { calibration: null, samples: [] };
+const defaults: Settings = { calibration: null, samples: [], deviceUrl: process.env.EXPO_PUBLIC_ESP32_URL || DEFAULT_ESP32_URL };
 const Context = createContext<SoilContext | null>(null);
 
 export function SoilSettingsProvider({ children }: { children: React.ReactNode }) {
@@ -24,12 +26,14 @@ export function SoilSettingsProvider({ children }: { children: React.ReactNode }
     let active = true;
     AsyncStorage.getItem(key).then(text => {
       if (!active) return;
+      let restored = defaults;
       if (text) {
         const stored = JSON.parse(text) as Settings;
         if (!Array.isArray(stored.samples)) throw new Error('Saved sample data is invalid.');
-        current.current = stored;
-        setState(stored);
+        restored = { ...defaults, ...stored };
       }
+      current.current = restored;
+      setState(restored);
       setReady(true);
     }).catch(reason => { if (active) setError(`Could not restore saved data: ${String(reason)}`); });
     return () => { active = false; };
@@ -48,6 +52,7 @@ export function SoilSettingsProvider({ children }: { children: React.ReactNode }
   }
   return <Context.Provider value={{ ...state, ready, error,
     saveCalibration: calibration => commit(old => ({ ...old, calibration })),
+    saveDeviceUrl: deviceUrl => commit(old => ({ ...old, deviceUrl: normalizeDeviceUrl(deviceUrl) })),
     saveSample: sample => commit(old => {
       if (old.samples.some(existing => existing.id === sample.id)) throw new Error('This reading is already saved for that pot. Refresh before saving again.');
       if (old.samples.some(existing => existing.sampleId === sample.sampleId && existing.split !== sample.split)) throw new Error('Keep this pot in the same train/test group as its earlier samples.');

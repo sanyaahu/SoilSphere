@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import type { SensorReading } from '../data';
+import { display, type SensorReading } from '../data';
 import modelData from '../ml/fertilizer-model.json';
 import healthData from '../ml/health-model.json';
 import { missingInputs, predictFertilizer } from '../ml/inference';
@@ -8,6 +8,7 @@ import { makeSample, samplesToCsv, sensorModelInput, sensorUnits } from '../ml/s
 import type { SampleDetails } from '../ml/samples';
 import type { ForestModel, ModelInput } from '../ml/types';
 import { useSoilSettings } from '../state/soil-settings';
+import { fertilizerSensorInput } from '../ml/fertilizer-input';
 
 const model = modelData as ForestModel;
 const example: ModelInput = { temperature: 26, humidity: 52, moisture: 38, nitrogen: 37, potassium: 0, phosphorus: 0, soil_type: 'Sandy' };
@@ -29,7 +30,7 @@ export function ModelPanel({ reading, demo, stale }: { reading: SensorReading; d
   const [resultTimestamp, setResultTimestamp] = useState('');
   const [details, setDetails] = useState<SampleDetails>({ sampleId: '', condition: '', label: '', labelBasis: '', split: 'unassigned' });
   const [saving, setSaving] = useState(false);
-  const input = source === 'Dataset example' ? example : { ...sensorModelInput(reading), soil_type: soil };
+  const input = source === 'Dataset example' ? example : fertilizerSensorInput(reading, soil);
   const missing = missingInputs(model, input);
 
   function runModel() {
@@ -86,6 +87,17 @@ export function ModelPanel({ reading, demo, stale }: { reading: SensorReading; d
         <Text style={s.label}>Soil type</Text>
         <Choices values={model.categories.soil_type} selected={soil} onChange={value => { setSoil(value); setResult(null); }} />
         <Text style={s.body}>{demo ? 'No live sensor connected.' : stale ? 'Connection lost. Refresh before predicting.' : `Using ${reading.deviceId}.`}</Text>
+        <View style={s.environmentRow}>
+          <View style={s.environmentMetric}>
+            <Text style={s.small}>Air temperature · SCD30</Text>
+            <Text style={s.environmentValue}>{demo ? '—' : display(reading.temperatureC ?? null, 1)} °C</Text>
+          </View>
+          <View style={s.environmentMetric}>
+            <Text style={s.small}>Relative humidity · SCD30</Text>
+            <Text style={s.environmentValue}>{demo ? '—' : display(reading.humidityPercent ?? null, 1)} %</Text>
+          </View>
+        </View>
+        <Text style={s.small}>These SCD30 readings supply the model’s temperature and humidity inputs. CO₂ ppm is excluded.</Text>
         {!!missing.length && <Text style={s.warning}>Still needed: {missing.join(', ')}.{missing.includes('moisture') ? ' Calibrate moisture in Device.' : ' Waiting for these measurements.'}</Text>}
         <Text style={s.body}>Sensor NPK uses mg/kg. The public dataset does not document its measurement method; this comparison is experimental.</Text>
       </> : <Text style={s.body}>Public-data example: N 37 · P 0 · K 0 · moisture 38 · 26°C · humidity 52 · Sandy soil. These are not your sensor readings.</Text>}
@@ -147,4 +159,7 @@ export const s = StyleSheet.create({
   prediction: { color: '#1F3529', fontSize: 29, fontWeight: '800', marginTop: 8 },
   warning: { color: '#A0601A', fontSize: 12, lineHeight: 18, marginTop: 8 },
   notice: { color: '#286B49', fontSize: 13, lineHeight: 19, marginVertical: 12 },
+  environmentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 10 },
+  environmentMetric: { flex: 1, minWidth: 120, backgroundColor: '#F0F3ED', borderRadius: 12, paddingHorizontal: 12, paddingBottom: 12 },
+  environmentValue: { color: '#1F3529', fontSize: 21, fontWeight: '800', marginTop: 6 },
 });

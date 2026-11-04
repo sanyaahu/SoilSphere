@@ -4,6 +4,8 @@ An Expo/React Native frontend for the capstone sensor, with an offline fertilize
 
 ## Model, calibration, and data collection
 
+The fertilizer model's temperature (°C) and relative humidity (%) inputs come from the SCD30 CO₂ sensor's `temperature` and `humidity` readings. **Model → My sensors** shows those measured values explicitly. CO₂ concentration in ppm is not a fertilizer-model feature. Missing temperature or humidity blocks prediction rather than substituting an example reading. This wiring is specific to the fertilizer model; it does not change health-model training or sample export.
+
 Start the existing app with `npm start` and reload it in Expo Go. Open the **Model** tab and press **Run model example** to run the bundled 200-tree classifier immediately, without an API key or Python server. The **Dataset example** is explicitly separate from **My sensors**. In the sensor view, choose the soil type; crop selection is no longer required. The retrained model uses NPK, moisture, temperature, humidity, and soil type. The original CSV retains its crop column for provenance, but training and prediction exclude it. Missing measurements are never filled with dataset averages or preview values. The fertilizer dataset does not document how its NPK/moisture values were measured, so sensor comparisons are marked experimental. A fertilizer class is not converted into a healthy/unhealthy label or a fertilizer application rate.
 
 The **Device** tab has moisture calibration. Enter at least three actual settled ADC readings for dry soil and three for your chosen wet-soil reference. Describe the soil and wetting/drainage procedure. The saved scale is relative: dry reference = 0%, wet reference = 100%; it is not volumetric water content. Profiles are tied to the device ID. Raw readings and out-of-span values are preserved. N/P/K are recorded in mg/kg. You can collect and train with raw moisture before calibration is ready.
@@ -63,6 +65,10 @@ npm start
 Scan the Expo QR code with Expo Go to preview the screens. Without configuration, the app uses clearly labeled sample readings. TypeScript can be checked with `npm run typecheck`; the local API contract can be checked with `npm run test:api`.
 
 ## Connect the phone to the local API
+
+For a phone connection, open **Device → Connect your ESP32** and enter the IP printed by Arduino Serial Monitor after Wi-Fi connects (115200 baud). The address is saved on the phone and takes priority over `EXPO_PUBLIC_ESP32_URL`. The app requests `/sensors`, waits up to eight seconds to accommodate firmware NPK retries, and shares concurrent requests rather than opening duplicate connections. A failed request is shown with its address and error; preview fallback is not silently presented as live. Existing calibration and saved samples are retained when adding this setting.
+
+To distinguish Wi-Fi/phone access from app issues, open `http://<ESP32-IP>/sensors` in the phone's browser. It should show JSON readings. A USB connection to the computer does not itself provide a network connection from the phone. The phone's Wi-Fi must permit access to the ESP32. The app can show a live partial reading even before NPK is installed; missing nutrient values remain empty and block fertilizer inference until measured.
 
 Set `EXPO_PUBLIC_ESP32_URL` to your ESP32's address (currently `http://172.26.160.8`). It reads `/sensors` directly every three seconds and retains up to 100 live readings for trends. It never appends demo records to live history. When contact is lost, the last measurement is identified as stale and blocked from sample collection. Native Expo Go can read the device on the same reachable network; web previews additionally require the ESP32 to allow browser requests from that origin.
 

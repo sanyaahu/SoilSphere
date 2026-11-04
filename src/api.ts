@@ -2,10 +2,12 @@
 import { ChatMessage, demoReadings, ReadingResponse, SensorReading } from './data';
 import { mapEsp32Reading } from './sensor-mapping';
 import { getInsights } from './recommendations';
+import { chooseReadings, DEFAULT_ESP32_URL, normalizeDeviceUrl, SENSOR_TIMEOUT_MS } from './device-connection';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '');
-const ESP32_URL = (process.env.EXPO_PUBLIC_ESP32_URL || 'http://172.26.160.8').replace(/\/$/, '');
-let liveHistory: SensorReading[] = [];
+const ESP32_URL = process.env.EXPO_PUBLIC_ESP32_URL || DEFAULT_ESP32_URL;
+const histories = new Map<string, SensorReading[]>();
+const pendingRequests = new Map<string, Promise<ReadingResponse>>();
 
 async function request(url: string, options: RequestInit = {}, timeoutMs = 2500) {
   const controller = new AbortController();
@@ -19,24 +21,24 @@ async function request(url: string, options: RequestInit = {}, timeoutMs = 2500)
   }
 }
 
-export async function fetchReadings(): Promise<ReadingResponse> {
+async function readDevice(address: string): Promise<ReadingResponse> {
   const [backend, hardware] = await Promise.allSettled([
     API_URL ? request(`${API_URL}/readings`) : Promise.resolve(null),
-    request(`${ESP32_URL}/sensors`),
+    request(`${address}/sensors`, {}, SENSOR_TIMEOUT_MS),
   ]);
-  if (hardware.status === 'fulfilled') {
-    const reading = mapEsp32Reading(hardware.value);
-    if (reading) {
-      liveHistory = [...liveHistory, reading].slice(-100);
-      return { mode: 'live', readings: liveHistory };
-    }
-  }
-  if (backend.status === 'fulfilled' && backend.value?.mode === 'live' && Array.isArray(backend.value.readings) && backend.value.readings.length) {
-    liveHistory = backend.value.readings;
-    return { mode: 'live', readings: liveHistory };
-  }
-  if (liveHistory.length) return { mode: 'live', readings: liveHistory, stale: true };
-  return { mode: 'demo', readings: demoReadings };
+  const result = chooseReadings({ hardware, backend, previous: histories.get(address) || [],
+    demo: demoReadings, address, mapReading: mapEsp32Reading });
+  if (result.mode === 'live' && !result.stale) histories.set(address, result.readings);
+  return result;
+}
+
+export function fetchReadings(deviceUrl = ESP32_URL): Promise<ReadingResponse> {
+  const address = normalizeDeviceUrl(deviceUrl);
+  const existing = pendingRequests.get(address);
+  if (existing) return existing;
+  const operation = readDevice(address).finally(() => pendingRequests.delete(address));
+  pendingRequests.set(address, operation);
+  return operation;
 }
 
 export async function askAdvisor(message: string, history: ChatMessage[], reading: SensorReading): Promise<string> {

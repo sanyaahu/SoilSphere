@@ -20,6 +20,7 @@ import { ModelPanel } from './src/components/ModelPanel';
 import { MoistureCalibration } from './src/components/MoistureCalibration';
 import { calibratedReading } from './src/ml/moisture';
 import { useSoilSettings } from './src/state/soil-settings';
+import { DeviceConnection } from './src/components/DeviceConnection';
 
 export type Tab = 'Overview' | 'Trends' | 'Advisor' | 'Device' | 'Model';
 
@@ -479,6 +480,8 @@ function Device({
     <>
       <Heading title="Device" note="Connection and data status" />
 
+      <DeviceConnection error={error} />
+
       <Card>
         <View style={s.between}>
           <View>
@@ -500,7 +503,7 @@ function Device({
         {[
           ['Last reading', fmtTime(reading.timestamp)],
           ['Battery', display(reading.batteryPercent) + '%'],
-          ['Data source', demo ? 'Sample data' : 'Local API'],
+          ['Data source', demo ? 'Sample data' : reading.deviceId === 'SoilSphere-ESP32' ? 'ESP32 over Wi-Fi' : 'Local API'],
         ].map(([k, v]) => (
           <View key={k} style={s.info}>
             <Text style={s.muted}>{k}</Text>
@@ -508,8 +511,6 @@ function Device({
           </View>
         ))}
       </Card>
-
-      {error && <Text style={s.error}>{error}</Text>}
 
       <TouchableOpacity style={s.refresh} onPress={refresh}>
         <Text style={s.refreshText}>Refresh readings</Text>
@@ -568,7 +569,7 @@ export default function App({
     setRefreshing(true);
 
     try {
-      const data = await fetchReadings();
+      const data = await fetchReadings(settings.deviceUrl);
 
       if (
         !Array.isArray(data.readings) ||
@@ -580,7 +581,7 @@ export default function App({
       setReadings(data.readings);
       setDemo(data.mode === 'demo');
       setStale(!!data.stale);
-      setError(data.stale ? 'Device disconnected. Showing the last received reading.' : null);
+      setError(data.connectionError || (data.stale ? 'Device disconnected. Showing the last received reading.' : null));
     } catch (e) {
       setError(
         e instanceof Error
@@ -590,7 +591,7 @@ export default function App({
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [settings.deviceUrl]);
 
   // Automatic refresh: updates sensor data without showing
   // the pull-to-refresh indicator or reloading the screen.
@@ -603,7 +604,7 @@ export default function App({
       loading = true;
 
       try {
-        const data = await fetchReadings();
+        const data = await fetchReadings(settings.deviceUrl);
 
         if (
           active &&
@@ -613,7 +614,7 @@ export default function App({
           setReadings(data.readings);
           setDemo(data.mode === 'demo');
           setStale(!!data.stale);
-          setError(data.stale ? 'Device disconnected. Showing the last received reading.' : null);
+          setError(data.connectionError || (data.stale ? 'Device disconnected. Showing the last received reading.' : null));
         }
       } catch (e) {
         if (active) {
@@ -639,7 +640,7 @@ export default function App({
       active = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [settings.deviceUrl]);
 
   const calibrated = demo ? readings : readings.map(value => calibratedReading(value, settings.calibration));
   const reading = calibrated[calibrated.length - 1];
