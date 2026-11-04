@@ -28,6 +28,7 @@ export type ReadingResponse = {
   mode: 'demo' | 'live';
   readings: SensorReading[];
   stale?: boolean;
+  connectionError?: string;
 };
 
 const values = [
