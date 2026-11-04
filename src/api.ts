@@ -14,7 +14,10 @@ async function request(url: string, options: RequestInit = {}, timeoutMs = 2500)
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
-    if (!response.ok) throw new Error(`Request failed (${response.status})`);
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.error || `Request failed (${response.status})`);
+    }
     return await response.json();
   } finally {
     clearTimeout(timer);
@@ -41,12 +44,22 @@ export function fetchReadings(deviceUrl = ESP32_URL): Promise<ReadingResponse> {
   return operation;
 }
 
-export async function askAdvisor(message: string, history: ChatMessage[], reading: SensorReading): Promise<string> {
+export async function askAdvisor(message: string, history: ChatMessage[], readings: SensorReading[]): Promise<string> {
+  const reading = readings[readings.length - 1];
   if (API_URL) {
-    const data = await request(`${API_URL}/chat`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, history, reading }),
-    }, 20000);
+    // Only send history from the same device as the latest reading, so demo samples don't mix into live trends.
+    const recent = readings.filter((r) => r.deviceId === reading?.deviceId).slice(-12);
+    let data;
+    try {
+      data = await request(`${API_URL}/chat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, history, readings: recent }),
+      }, 60000); // Claude can take a while to answer
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') throw new Error('The advisor took too long to answer. Try again.');
+      if (e instanceof TypeError) throw new Error('Could not reach the SoilSphere server. Is `npm run api` running?');
+      throw e; // server-provided message, e.g. a bad API key
+    }
     if (typeof data.reply !== 'string') throw new Error('The advisor returned no reply.');
     return data.reply;
   }
