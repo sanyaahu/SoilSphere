@@ -69,6 +69,21 @@ test('model refuses missing inputs and unknown categories, and flags unseen nume
   assert.ok(predictFertilizer(model, { ...input, potassium: 1000 }).warnings.length);
 });
 
+test('fertilizer accepts humidity and moisture from 0 through 100 without training-range warnings', () => {
+  for (const feature of ['humidity', 'moisture']) {
+    for (const value of [0, 10, 50, 90, 100]) {
+      const result = predictFertilizer(model, { ...parity[0].input, [feature]: value });
+      assert.ok(model.classes.includes(result.prediction));
+      assert.equal(result.warnings.some(warning => warning.startsWith(`${feature} `)), false);
+    }
+    for (const value of [-0.1, 100.1]) {
+      assert.throws(() => predictFertilizer(model, { ...parity[0].input, [feature]: value }), /between 0 and 100/);
+    }
+    const healthResult = predictFertilizer({ ...model, task: 'health' }, { ...parity[0].input, [feature]: 0 });
+    assert.ok(healthResult.warnings.some(warning => warning.startsWith(`${feature} `)));
+  }
+});
+
 test('fertilizer predictions need no crop selection and do not depend on crop labels', () => {
   assert.equal(model.categories.crop_type, undefined);
   assert.deepEqual(Object.keys(model.categories), ['soil_type']);

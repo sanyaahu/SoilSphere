@@ -6,9 +6,11 @@ export function predictFertilizer(model: ForestModel, input: ModelInput) {
   for (const feature of model.numericFeatures) {
     const value = input[feature];
     if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`Missing measurement: ${feature}`);
+    const percentageInput = model.task === 'fertilizer' && (feature === 'humidity' || feature === 'moisture');
+    if (percentageInput && (value < 0 || value > 100)) throw new Error(`${feature} must be between 0 and 100%.`);
     encoded.push(Math.fround(value));
     const range = model.ranges[feature];
-    if (range && (value < range.min || value > range.max)) warnings.push(`${feature} is outside the training range (${range.min.toFixed(1)}–${range.max.toFixed(1)}).`);
+    if (!percentageInput && range && (value < range.min || value > range.max)) warnings.push(`${feature} is outside the training range (${range.min.toFixed(1)}–${range.max.toFixed(1)}).`);
   }
   for (const [feature, options] of Object.entries(model.categories)) {
     const value = input[feature];
