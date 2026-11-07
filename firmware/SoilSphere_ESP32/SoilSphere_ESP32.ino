@@ -27,6 +27,59 @@ const char* ssid = "CMU-DEVICE";
 #define COLLECT_NUMBER 10
 
 // ========================
+// Moisture calibration
+// ========================
+// Raw ADC readings from our experiments:
+//
+// Dry soil:         2254 -> 0%
+// Medium soil:      1776 -> 25%
+// Wet soil:         1046 -> 50%
+// Waterlogged soil:    0 -> 100%
+//
+// These percentages represent relative
+// moisture, NOT volumetric water content.
+
+const int MOISTURE_DRY = 2254;
+const int MOISTURE_MEDIUM = 1776;
+const int MOISTURE_WET = 1046;
+const int MOISTURE_WATERLOGGED = 0;
+
+// Convert raw ADC reading to moisture %
+float calculateMoisturePercent(int raw) {
+
+  // Drier than our dry calibration
+  if (raw >= MOISTURE_DRY) {
+    return 0.0f;
+  }
+
+  // Dry to medium: 0% - 25%
+  if (raw >= MOISTURE_MEDIUM) {
+    return 25.0f *
+           (MOISTURE_DRY - raw) /
+           (MOISTURE_DRY - MOISTURE_MEDIUM);
+  }
+
+  // Medium to wet: 25% - 50%
+  if (raw >= MOISTURE_WET) {
+    return 25.0f +
+           25.0f *
+           (MOISTURE_MEDIUM - raw) /
+           (MOISTURE_MEDIUM - MOISTURE_WET);
+  }
+
+  // Wet to waterlogged: 50% - 100%
+  if (raw > MOISTURE_WATERLOGGED) {
+    return 50.0f +
+           50.0f *
+           (MOISTURE_WET - raw) /
+           (MOISTURE_WET - MOISTURE_WATERLOGGED);
+  }
+
+  // Waterlogged or beyond
+  return 100.0f;
+}
+
+// ========================
 // Sensors
 // ========================
 Adafruit_SCD30 scd30;
@@ -46,6 +99,7 @@ float lux = NAN;
 float oxygenLevel = NAN;
 
 int moistureRaw = 0;
+float moisturePercent = 0.0f;
 
 int nitrogen = -1;
 int phosphorus = -1;
@@ -206,11 +260,20 @@ void updateSensors() {
   Serial.print(oxygenLevel, 2);
   Serial.println(" %");
 
-  // Soil moisture (RAW)
+  // ========================
+  // Soil moisture (UPDATED)
+  // ========================
   moistureRaw = analogRead(MOISTURE_PIN);
+
+  moisturePercent =
+    calculateMoisturePercent(moistureRaw);
 
   Serial.print("Soil Moisture Raw: ");
   Serial.println(moistureRaw);
+
+  Serial.print("Soil Moisture: ");
+  Serial.print(moisturePercent, 1);
+  Serial.println(" %");
 
   // NPK with up to 3 attempts
   uint16_t n, p, k;
@@ -278,8 +341,13 @@ void handleSensors() {
   json += ",\"oxygen\":";
   json += isfinite(oxygenLevel) ? String(oxygenLevel, 2) : "null";
 
+  // Moisture raw reading
   json += ",\"moistureRaw\":";
   json += String(moistureRaw);
+
+  // Moisture percentage (NEW)
+  json += ",\"moisturePercent\":";
+  json += String(moisturePercent, 1);
 
   json += ",\"nitrogen\":";
   json += npkValid ? String(nitrogen) : "null";
