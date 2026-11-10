@@ -7,6 +7,7 @@ import { makeSample, samplesToCsv } from '../src/ml/samples.ts';
 import { mapEsp32Reading } from '../src/sensor-mapping.ts';
 import { fertilizerSensorInput } from '../src/ml/fertilizer-input.ts';
 import { chooseReadings, normalizeDeviceUrl, SENSOR_TIMEOUT_MS } from '../src/device-connection.ts';
+import { healthSensorInput, healthLabels, healthExamples } from '../src/ml/health-input.ts';
 
 const load = name => JSON.parse(readFileSync(new URL(name, import.meta.url), 'utf8'));
 const model = load('../src/ml/fertilizer-model.json');
@@ -14,6 +15,38 @@ const parity = load('../ml/artifacts/runtime_parity.json');
 const sensor = { nitrogen: 37, phosphorus: 0, potassium: 0, moistureRaw: 450, temperature: 26, humidity: 52, co2: 600, oxygen: 20.5, lux: 1000 };
 const reading = mapEsp32Reading(sensor, '2026-11-04T12:00:00Z');
 const details = { sampleId: 'pot-01', condition: 'reference', label: '', labelBasis: '', split: 'train' };
+
+test('health demo matches Python on all 26 rows and always returns one of the three requested labels', () => {
+  const health = load('../src/ml/health-model.json');
+  const fixtures = load('../ml/artifacts/health_demo_parity.json');
+  assert.equal(health.demoOnly, true);
+  assert.equal(health.metrics.testAccuracy, null);
+  assert.equal(fixtures.length, 26);
+  assert.deepEqual([...health.classes].sort(), ['could_be_better', 'healthy', 'unhealthy']);
+  for (const fixture of fixtures) {
+    const actual = predictFertilizer(health, fixture.input);
+    assert.equal(actual.prediction, fixture.prediction);
+    assert.ok(healthLabels[actual.prediction]);
+    actual.scores.forEach((value, index) => assert.ok(Math.abs(value - fixture.scores[index]) < 1e-10));
+  }
+  for (const example of healthExamples) assert.ok(healthLabels[predictFertilizer(health, example.input).prediction]);
+});
+
+test('health live comparison requires current calibrated complete measurements and preserves zero nutrients', () => {
+  const calibration = createCalibration('900,910,920', '300,310,320', reading.deviceId, 'test reference');
+  const actual = calibratedReading(reading, calibration);
+  const input = healthSensorInput(actual, calibration, false, false);
+  assert.equal(input.phosphorus, 0);
+  assert.equal(input.moisture, actual.moisturePercent);
+  assert.throws(() => healthSensorInput(actual, calibration, true, false), /Connect/);
+  assert.throws(() => healthSensorInput(actual, calibration, false, true), /Connection lost/);
+  assert.throws(() => healthSensorInput(actual, null, false, false), /Calibrate/);
+  assert.throws(() => healthSensorInput({ ...actual, moistureCalibrationId: 'other' }, calibration, false, false), /Calibrate/);
+  assert.throws(() => healthSensorInput({ ...actual, nitrogenMgKg: null }, calibration, false, false), /Waiting for nitrogen/);
+  assert.throws(() => healthSensorInput({ ...actual, moisturePercent: 101 }, calibration, false, false), /outside/);
+  assert.throws(() => healthSensorInput({ ...actual, potassiumMgKg: -1 }, calibration, false, false), /zero or greater/);
+  assert.throws(() => healthSensorInput({ ...actual, phosphorusMgKg: NaN }, calibration, false, false), /Waiting for phosphorus/);
+});
 
 test('device address accepts the Serial Monitor IP and normalizes the sensor endpoint', () => {
   for (const value of ['172.26.160.8', 'http://172.26.160.8/', 'http://172.26.160.8/sensors']) {

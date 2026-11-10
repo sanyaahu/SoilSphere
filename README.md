@@ -22,11 +22,19 @@ Files inside this app:
 | Python training code | `ml/soilsphere/` |
 | Python model and exporter | `ml/artifacts/fertilizer_model.joblib`, `ml/export_model.py` |
 | Your collected samples | Phone/browser local storage, then your exported CSV |
-| Health model | `src/ml/health-model.json` (explicitly untrained until labeled data is supplied) |
+| Health model | `src/ml/health-model.json` (experimental three-class demo using partly synthetic moisture data) |
 
 The phone model matches Python predictions and class scores on all 599 source rows. That is a runtime consistency check, not additional evidence of accuracy. Evaluation uses 479 training rows, 5-fold training-only model comparisons, and 120 reserved test rows: the model without crop input scores 86.6% mean validation accuracy and 95.0% test accuracy. The previous crop-dependent version scored 88.3% and 95.8% respectively on the same splits. These are public-dataset fertilizer scores, not soil-health or sensor-validation scores. Removing the crop input does not establish suitability for every plant or soil.
 
-To train the health model after exporting independently labeled data, set up the optional local Python environment in this app:
+### Experimental soil-condition demo
+
+The Model tab now includes **Soil-condition model** with **Examples** and **My sensors** views. The bundled 200-tree demo uses calibrated moisture and N/P/K in mg/kg and displays **Healthy**, **Could be better**, or **Unhealthy**. Example cases run offline without hardware. Live comparisons require a fresh device reading, complete NPK, and moisture calibration for that device. Missing measurements are never replaced by example values. Values outside calibration bounds block comparison; values outside the training range display warnings.
+
+The data contains 26 measured NPK triples and 10 recorded moisture percentages, plus 16 explicitly synthetic moisture values. Provisional labels encode the user's experimental definitions: dry/waterlogged or 3 tbsp fertilizer is unhealthy; 1-2 tbsp with 40-60% moisture is healthy; remaining intermediate cases could be better. These labels do not establish plant health or recommended fertilizer doses. There are 6 healthy, 14 unhealthy, and 6 could-be-better rows, split into 18 training and 8 demonstration-test pots. No real-world accuracy is claimed. The original experiment's calibration profile is unavailable, so live comparisons remain exploratory even when the current device is calibrated.
+
+Source data and assumptions are preserved in `ml/data/health-demo/`. `ml/artifacts/health_demo_parity.json` verifies phone/Python runtime agreement on all 26 rows. Demo outputs never become labels in saved real training samples automatically. The independent-data trainer below remains a separate binary healthy/unhealthy pipeline; it does not accept synthetic demo labels as validated health evidence.
+
+To train a replacement health model after exporting independently labeled data, set up the optional local Python environment in this app:
 
 ```powershell
 python -m venv ml/.venv

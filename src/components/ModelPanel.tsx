@@ -9,6 +9,7 @@ import type { SampleDetails } from '../ml/samples';
 import type { ForestModel, ModelInput } from '../ml/types';
 import { useSoilSettings } from '../state/soil-settings';
 import { fertilizerSensorInput } from '../ml/fertilizer-input';
+import { healthExamples, healthLabels, healthSensorInput } from '../ml/health-input';
 
 const model = modelData as ForestModel;
 const example: ModelInput = { temperature: 26, humidity: 52, moisture: 38, nitrogen: 37, potassium: 0, phosphorus: 0, soil_type: 'Sandy' };
@@ -19,6 +20,48 @@ export function Choices({ values, selected, onChange }: { values: string[]; sele
       <Text style={[s.choiceText, value === selected && s.chosenText]}>{value || 'Unlabeled'}</Text>
     </TouchableOpacity>)}
   </ScrollView>;
+}
+
+function HealthDemoPanel({ reading, demo, stale }: { reading: SensorReading; demo: boolean; stale: boolean }) {
+  const settings = useSoilSettings();
+  const [source, setSource] = useState('Examples');
+  const [selected, setSelected] = useState(healthExamples[0].name);
+  const healthModel = healthData as unknown as ForestModel;
+  const example = healthExamples.find(item => item.name === selected)!;
+  let input: ModelInput | null = null;
+  let issue = '';
+  try {
+    input = source === 'Examples' ? example.input : healthSensorInput(reading, settings.calibration, demo, stale);
+  } catch (error) { issue = error instanceof Error ? error.message : String(error); }
+  let result: ReturnType<typeof predictFertilizer> | null = null;
+  if (input) {
+    try { result = predictFertilizer(healthModel, input); }
+    catch (error) { issue = error instanceof Error ? error.message : String(error); }
+  }
+  return <View style={s.card}>
+    <Text style={s.heading}>Soil-condition model</Text>
+    <Text style={s.body}>Moisture and NPK combine into Healthy, Could be better, or Unhealthy. These describe our experimental conditions; plant health has not been independently validated.</Text>
+    <Choices values={['Examples', 'My sensors']} selected={source} onChange={setSource} />
+    {source === 'Examples' ? <>
+      <Choices values={healthExamples.map(item => item.name)} selected={selected} onChange={setSelected} />
+      <Text style={s.small}>{example.note} This is an example, not your current soil.</Text>
+    </> : <>
+      <Text style={s.body}>{demo ? 'No live sensor connected.' : stale ? 'Sensor connection needs refreshing.' : `${reading.deviceId} · ${new Date(reading.timestamp).toLocaleString()}`}</Text>
+      <Text style={s.small}>Uses your device’s calibrated dry-to-wet scale. Its equivalence to the experiment’s original calibration is unverified.</Text>
+    </>}
+    {!!issue && <Text style={s.warning} accessibilityLiveRegion="polite">{issue}</Text>}
+    {input && <Text style={s.body}>Moisture {display(input.moisture as number, 1)}% · N {display(input.nitrogen as number)} · P {display(input.phosphorus as number)} · K {display(input.potassium as number)} mg/kg</Text>}
+    {result && <View style={s.result} accessibilityLiveRegion="polite">
+      <Text style={s.kicker}>{source === 'Examples' ? 'EXAMPLE RESULT' : 'EXPERIMENTAL LIVE COMPARISON'}</Text>
+      <Text style={s.prediction}>{healthLabels[result.prediction] ?? 'Could be better'}</Text>
+      <Text style={s.body}>{result.prediction === 'healthy' ? 'Most similar to the demo’s acceptable conditions.' : result.prediction === 'unhealthy' ? 'Most similar to the demo’s stressed conditions.' : 'Most similar to the demo’s intermediate conditions.'}</Text>
+      <Text style={s.small}>Demo target: 40–60% moisture with the 1–2 tbsp experimental treatment. Fertilizer amounts are experiment context, not application advice.</Text>
+      {input && (input.moisture as number) < 40 && <Text style={s.warning}>Moisture is below the experiment’s target range.</Text>}
+      {input && (input.moisture as number) > 60 && <Text style={s.warning}>Moisture is above the experiment’s target range.</Text>}
+      {result.warnings.map(warning => <Text style={s.warning} key={warning}>{warning}</Text>)}
+    </View>}
+    <Text style={s.small}>26 experimental NPK readings; 16 moisture values were synthetic. Labels follow assumed treatment rules. Real-world accuracy is not established. Results are never saved as training labels automatically.</Text>
+  </View>;
 }
 
 export function ModelPanel({ reading, demo, stale }: { reading: SensorReading; demo: boolean; stale: boolean }) {
@@ -64,7 +107,7 @@ export function ModelPanel({ reading, demo, stale }: { reading: SensorReading; d
     } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
   }
   let healthResult = 'Collect independently labeled samples to train your healthy/unhealthy model.';
-  if ('trees' in healthData && !demo && !stale) {
+  if ('trees' in healthData && !healthData.demoOnly && !demo && !stale) {
     try {
       const healthModel = healthData as unknown as ForestModel & { units: Record<string, string>; moistureCalibrationId?: string };
       if (healthModel.moistureCalibrationId && reading.moistureCalibrationId !== healthModel.moistureCalibrationId) throw new Error('Use the moisture calibration used during training.');
@@ -109,13 +152,13 @@ export function ModelPanel({ reading, demo, stale }: { reading: SensorReading; d
         <Text style={s.body}>Fertilizer class suggestion. Soil health and nutrient excess are not assessed.</Text>
         {result.warnings.map(warning => <Text style={s.warning} key={warning}>{warning}</Text>)}
       </View>}
-      <Text style={s.small}>{(model.metrics.testAccuracy * 100).toFixed(1)}% accuracy on {model.metrics.testRows} reserved public examples · {((model.metrics.cvAccuracy ?? 0) * 100).toFixed(1)}% cross-validation average. Sensor accuracy is unverified.</Text>
+      <Text style={s.small}>{model.metrics.testAccuracy === null ? 'Unmeasured' : `${(model.metrics.testAccuracy * 100).toFixed(1)}%`} accuracy on {model.metrics.testRows} reserved public examples · {((model.metrics.cvAccuracy ?? 0) * 100).toFixed(1)}% cross-validation average. Sensor accuracy is unverified.</Text>
     </View>
-    <View style={s.card}>
+    {healthData.demoOnly ? <HealthDemoPanel reading={reading} demo={demo} stale={stale} /> : <View style={s.card}>
       <Text style={s.heading}>Your soil-health model</Text>
       <Text style={s.body}>{healthResult}</Text>
       <Text style={s.small}>CO₂ and oxygen can be included when training with your own readings.</Text>
-    </View>
+    </View>}
     <View style={s.card}>
       <Text style={s.heading}>Save a training sample</Text>
       <Text style={s.body}>{settings.samples.length} actual samples saved on this device. Raw moisture is preserved; calibration can come later.</Text>
