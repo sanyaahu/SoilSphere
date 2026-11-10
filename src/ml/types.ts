@@ -5,8 +5,11 @@ export type ForestModel = {
   numericFeatures: string[];
   categories: Record<string, string[]>;
   ranges: Record<string, { min: number; max: number }>;
+  demoOnly?: boolean;
+  units?: Record<string, string>;
+  moistureCalibrationId?: string;
   trees: { left: number[]; right: number[]; feature: number[]; threshold: number[]; values: number[][] }[];
-  metrics: { rows: number; testRows: number; testAccuracy: number; cvAccuracy: number | null };
+  metrics: { rows: number; testRows: number; testAccuracy: number | null; cvAccuracy: number | null };
 };
 
 export type ModelInput = Record<string, number | string | null | undefined>;
