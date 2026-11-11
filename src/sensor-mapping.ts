@@ -12,7 +12,7 @@ export function mapEsp32Reading(input: unknown, timestamp = new Date().toISOStri
     nitrogenMgKg: measured(sensor.nitrogen, 0, 2999),
     phosphorusMgKg: measured(sensor.phosphorus, 0, 2999),
     potassiumMgKg: measured(sensor.potassium, 0, 2999),
-    moistureRaw: measured(sensor.moistureRaw, 0, 4095), moisturePercent: null,
+    moistureRaw: measured(sensor.moistureRaw, 0, 4095), moisturePercent: measured(sensor.moisturePercent, 0, 100),
     temperatureC: measured(sensor.temperature, -40, 100),
     humidityPercent: measured(sensor.humidity, 0, 100),
     lightLux: measured(sensor.lux, 0, 100000),

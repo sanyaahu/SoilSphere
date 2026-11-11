@@ -40,12 +40,27 @@ test('health live comparison requires current calibrated complete measurements a
   assert.equal(input.moisture, actual.moisturePercent);
   assert.throws(() => healthSensorInput(actual, calibration, true, false), /Connect/);
   assert.throws(() => healthSensorInput(actual, calibration, false, true), /Connection lost/);
-  assert.throws(() => healthSensorInput(actual, null, false, false), /Calibrate/);
-  assert.throws(() => healthSensorInput({ ...actual, moistureCalibrationId: 'other' }, calibration, false, false), /Calibrate/);
+  assert.throws(() => healthSensorInput(actual, null, false, false), /calibration does not match/);
+  assert.throws(() => healthSensorInput({ ...actual, moistureCalibrationId: 'other' }, calibration, false, false), /calibration does not match/);
   assert.throws(() => healthSensorInput({ ...actual, nitrogenMgKg: null }, calibration, false, false), /Waiting for nitrogen/);
   assert.throws(() => healthSensorInput({ ...actual, moisturePercent: 101 }, calibration, false, false), /outside/);
   assert.throws(() => healthSensorInput({ ...actual, potassiumMgKg: -1 }, calibration, false, false), /zero or greater/);
   assert.throws(() => healthSensorInput({ ...actual, phosphorusMgKg: NaN }, calibration, false, false), /Waiting for phosphorus/);
+});
+
+test('firmware moisture percentages including zero run the health model without a separate app calibration', () => {
+  const model = load('../src/ml/health-model.json');
+  for (const moisturePercent of [0, 50, 100]) {
+    const actual = mapEsp32Reading({ ...sensor, moisturePercent });
+    assert.equal(actual.moisturePercent, moisturePercent);
+    const input = healthSensorInput(actual, null, false, false);
+    assert.equal(input.moisture, moisturePercent);
+    assert.ok(healthLabels[predictFertilizer(model, input).prediction]);
+  }
+  assert.throws(() => healthSensorInput(reading, null, false, false), /Waiting for a moisture percentage/);
+  for (const moisturePercent of [null, -1, 101, '0']) {
+    assert.equal(mapEsp32Reading({ ...sensor, moisturePercent }).moisturePercent, null);
+  }
 });
 
 test('device address accepts the Serial Monitor IP and normalizes the sensor endpoint', () => {
