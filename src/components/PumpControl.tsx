@@ -17,7 +17,6 @@ async function pumpRequest(deviceUrl: string, action: 'on' | 'off') {
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(`${deviceUrl}/pump/${action}`, { method: 'POST', signal: controller.signal });
-    if (response.status === 409) throw new Error('Auto-watering is running right now. Try again in a few seconds.');
     if (response.status === 404) throw new Error('This ESP32 has no pump routes. Upload the latest SoilSphere_ESP32.ino to it.');
     if (!response.ok) throw new Error(`ESP32 replied with an error (${response.status}).`);
   } catch (e) {
@@ -101,7 +100,7 @@ export function PumpControl() {
       <Text style={p.small}>
         Safety: the pump also stops by itself about 2 seconds after the app stops talking to it.
         Needs the latest SoilSphere_ESP32.ino on the board; change its address on the Device tab.
-        The board also waters on its own for 3 seconds when moisture drops below 30%.
+        The board also runs the pump on its own whenever moisture is below 50%.
       </Text>
     </View>
   );

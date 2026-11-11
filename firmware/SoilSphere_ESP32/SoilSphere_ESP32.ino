@@ -32,15 +32,9 @@ const char* ssid = "CMU-DEVICE";
 // MOSFET driver "In" pin: HIGH = pump on, LOW = pump off (one direction only).
 #define PUMP_PIN 7
 
-// Auto-watering: run the pump for PUMP_RUN_MS whenever moisture drops below the threshold.
-const float MOISTURE_THRESHOLD_PERCENT = 30.0f;
-const unsigned long PUMP_RUN_MS = 3000;        // run for 3 seconds
-// Water takes time to soak down to the probe. Without this wait the next reading
-// (3 s later) still looks dry and the pump would keep re-triggering and flood the pot.
-const unsigned long PUMP_COOLDOWN_MS = 60000;  // wait 60 s after watering before re-checking
-const int DRY_READINGS_REQUIRED = 2;           // ignore a single noisy low reading
-const int MAX_WATERINGS_PER_HOUR = 6;          // hard cap if the probe is dry/out of soil
-const int MOISTURE_FAULT_RAW = 3500;           // above this, assume the probe is disconnected
+// Auto-watering: pump runs while moisture is below the threshold, stops once it's at or above.
+const float MOISTURE_THRESHOLD_PERCENT = 50.0f;
+const int MOISTURE_FAULT_RAW = 3500;  // above this the probe is likely disconnected: don't pump
 
 // Manual control from the app's hold-to-run button (Pump tab).
 // The app re-sends /pump/on about every 0.5 s while the button is held. If those stop
@@ -127,11 +121,6 @@ float moisturePercent = 0.0f;
 volatile bool autoPumpRunning = false;
 volatile bool manualPumpOn = false;
 volatile unsigned long manualLeaseUntil = 0;
-unsigned long lastWateringEnded = 0;
-bool hasWatered = false;
-int dryReadingCount = 0;
-unsigned long wateringTimes[MAX_WATERINGS_PER_HOUR] = {0};
-int wateringIndex = 0;
 
 int nitrogen = -1;
 int phosphorus = -1;
@@ -401,71 +390,28 @@ void handleSensors() {
 // ========================
 // Pump control
 // ========================
-void pumpOn() {
-  digitalWrite(PUMP_PIN, HIGH);
+// The pump is on if either the moisture rule or the app's button wants it on.
+void applyPump() {
+  digitalWrite(PUMP_PIN, (autoPumpRunning || manualPumpOn) ? HIGH : LOW);
 }
 
-void pumpOff() {
-  digitalWrite(PUMP_PIN, LOW);
-}
-
-// Auto-watering run as its own task, so it lasts exactly PUMP_RUN_MS even while
-// updateSensors() is blocked on slow NPK retries, and the web server keeps working.
-void autoWateringTask(void *param) {
-  Serial.printf("[pump] auto ON for %lu ms\n", PUMP_RUN_MS);
-  pumpOn();
-  vTaskDelay(pdMS_TO_TICKS(PUMP_RUN_MS));
-  if (!manualPumpOn) pumpOff();
-  Serial.println("[pump] auto OFF");
-  lastWateringEnded = millis();
-  autoPumpRunning = false;
-  vTaskDelete(NULL);
-}
-
-int wateringsInLastHour() {
-  int count = 0;
-  for (int i = 0; i < MAX_WATERINGS_PER_HOUR; i++) {
-    if (wateringTimes[i] != 0 && millis() - wateringTimes[i] < 3600000UL) count++;
-  }
-  return count;
-}
-
-// Called after each sensor update.
+// Called after each sensor update (every 3 s).
 void checkAutoWatering() {
-  if (autoPumpRunning || manualPumpOn) return;  // never start while someone is watering by hand
+  bool wantOn = moistureRaw <= MOISTURE_FAULT_RAW &&
+                moisturePercent < MOISTURE_THRESHOLD_PERCENT;
+  if (wantOn == autoPumpRunning) return;  // no change, nothing to print
 
-  if (moistureRaw > MOISTURE_FAULT_RAW) {
-    dryReadingCount = 0;
-    Serial.println("[pump] moisture probe reading out of range - not watering");
-    return;
+  autoPumpRunning = wantOn;
+  applyPump();
+  if (wantOn) {
+    Serial.printf("[pump] moisture %.1f%% below %.0f%% - pump ON\n",
+                  moisturePercent, MOISTURE_THRESHOLD_PERCENT);
+  } else if (moistureRaw > MOISTURE_FAULT_RAW) {
+    Serial.println("[pump] moisture probe reading out of range - pump OFF");
+  } else {
+    Serial.printf("[pump] moisture %.1f%% reached %.0f%% - pump OFF\n",
+                  moisturePercent, MOISTURE_THRESHOLD_PERCENT);
   }
-
-  if (moisturePercent >= MOISTURE_THRESHOLD_PERCENT) {
-    dryReadingCount = 0;
-    return;
-  }
-
-  dryReadingCount++;
-  if (dryReadingCount < DRY_READINGS_REQUIRED) return;
-
-  if (hasWatered && millis() - lastWateringEnded < PUMP_COOLDOWN_MS) {
-    Serial.println("[pump] dry, but waiting for the last watering to soak in");
-    return;
-  }
-
-  if (wateringsInLastHour() >= MAX_WATERINGS_PER_HOUR) {
-    Serial.println("[pump] hourly watering limit reached - check the probe and the pot");
-    return;
-  }
-
-  Serial.printf("[pump] moisture %.1f%% < %.0f%% - watering\n",
-                moisturePercent, MOISTURE_THRESHOLD_PERCENT);
-  autoPumpRunning = true;
-  hasWatered = true;
-  dryReadingCount = 0;
-  wateringTimes[wateringIndex] = millis();
-  wateringIndex = (wateringIndex + 1) % MAX_WATERINGS_PER_HOUR;
-  xTaskCreate(autoWateringTask, "autoWatering", 4096, NULL, 1, NULL);
 }
 
 // Stops a manual run if the app stops renewing it.
@@ -474,8 +420,8 @@ void manualPumpWatchdogTask(void *param) {
   for (;;) {
     if (manualPumpOn && (long)(millis() - manualLeaseUntil) >= 0) {
       manualPumpOn = false;
-      if (!autoPumpRunning) pumpOff();
-      Serial.println("[pump] manual: no signal from app - stopped");
+      applyPump();
+      Serial.println("[pump] manual: no signal from app - released");
     }
     vTaskDelay(pdMS_TO_TICKS(50));
   }
@@ -495,24 +441,20 @@ void sendPumpState(int code) {
 
 // POST /pump/on - start (or keep running) the pump for another MANUAL_LEASE_MS.
 void handlePumpOn() {
-  if (autoPumpRunning) {  // a 3-second auto-watering run owns the pump right now
-    sendPumpState(409);
-    return;
-  }
   manualLeaseUntil = millis() + MANUAL_LEASE_MS;
   if (!manualPumpOn) {
     manualPumpOn = true;
-    pumpOn();
+    applyPump();
     Serial.println("[pump] manual ON");
   }
   sendPumpState(200);
 }
 
-// POST /pump/off - stop immediately.
+// POST /pump/off - release the button. The pump keeps running only if moisture is below 50%.
 void handlePumpOff() {
   if (manualPumpOn) {
     manualPumpOn = false;
-    if (!autoPumpRunning) pumpOff();
+    applyPump();
     Serial.println("[pump] manual OFF");
   }
   sendPumpState(200);
