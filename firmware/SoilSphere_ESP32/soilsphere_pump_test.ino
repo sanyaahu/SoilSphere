@@ -112,6 +112,14 @@
   unsigned long wateringTimes[MAX_WATERINGS_PER_HOUR] = {0};
   int wateringIndex = 0;
 
+  // Manual control from the app's hold-to-run button.
+  // The app re-sends /pump/on about every 0.5 s while the button is held. If those stop
+  // arriving (finger lifted but /pump/off lost, Wi-Fi drop, app closed), the pump stops
+  // by itself once the lease runs out.
+  const unsigned long MANUAL_LEASE_MS = 2000;
+  volatile bool manualPumpOn = false;
+  volatile unsigned long manualLeaseUntil = 0;
+
   int nitrogen = -1;
   int phosphorus = -1;
   int potassium = -1;
@@ -355,7 +363,7 @@
     json += String(moisturePercent, 1);
 
     json += ",\"pumpRunning\":";
-    json += pumpRunning ? "true" : "false";
+    json += (pumpRunning || manualPumpOn) ? "true" : "false";
 
     json += ",\"nitrogen\":";
     json += npkValid ? String(nitrogen) : "null";
@@ -413,6 +421,63 @@
     vTaskDelete(NULL);
   }
 
+  // ========================
+  // Manual pump control (app hold-to-run button)
+  // ========================
+  // Separate task so the lease is enforced even while loop() is busy reading sensors.
+  void manualPumpWatchdogTask(void *param) {
+    for (;;) {
+      if (manualPumpOn && (long)(millis() - manualLeaseUntil) >= 0) {
+        manualPumpOn = false;
+        pumpStop();
+        Serial.println("[pump] manual: no signal from app - stopped");
+      }
+      vTaskDelay(pdMS_TO_TICKS(50));
+    }
+  }
+
+  void sendPumpState(int code) {
+    String json = "{\"pumpRunning\":";
+    json += (pumpRunning || manualPumpOn) ? "true" : "false";
+    json += ",\"manual\":";
+    json += manualPumpOn ? "true" : "false";
+    json += ",\"autoWatering\":";
+    json += pumpRunning ? "true" : "false";
+    json += "}";
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(code, "application/json", json);
+  }
+
+  // POST /pump/on - start (or keep running) the pump for another MANUAL_LEASE_MS.
+  void handlePumpOn() {
+    if (pumpRunning) {  // an auto-watering run owns the pump right now
+      sendPumpState(409);
+      return;
+    }
+    manualLeaseUntil = millis() + MANUAL_LEASE_MS;
+    if (!manualPumpOn) {
+      manualPumpOn = true;
+      pumpForward();
+      Serial.println("[pump] manual ON");
+    }
+    sendPumpState(200);
+  }
+
+  // POST /pump/off - stop immediately.
+  void handlePumpOff() {
+    if (manualPumpOn) {
+      manualPumpOn = false;
+      pumpStop();
+      Serial.println("[pump] manual OFF");
+    }
+    sendPumpState(200);
+  }
+
+  // GET /pump - current state.
+  void handlePumpStatus() {
+    sendPumpState(200);
+  }
+
   int wateringsInLastHour() {
     int count = 0;
     for (int i = 0; i < MAX_WATERINGS_PER_HOUR; i++) {
@@ -423,7 +488,7 @@
 
   // Called after each sensor update.
   void checkAutoWatering() {
-    if (pumpRunning) return;
+    if (pumpRunning || manualPumpOn) return;  // never start while someone is watering by hand
 
     if (moistureRaw > MOISTURE_FAULT_RAW) {
       dryReadingCount = 0;
@@ -546,6 +611,10 @@
     }
 
     server.on("/sensors", HTTP_GET, handleSensors);
+    server.on("/pump", HTTP_GET, handlePumpStatus);
+    server.on("/pump/on", HTTP_POST, handlePumpOn);
+    server.on("/pump/off", HTTP_POST, handlePumpOff);
+    xTaskCreate(manualPumpWatchdogTask, "pumpWatchdog", 2048, NULL, 2, NULL);
     server.begin();
 
     Serial.println("SoilSphere web server started!");

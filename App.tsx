@@ -27,9 +27,10 @@ import { calibratedReading } from './src/ml/moisture';
 import { useSoilSettings } from './src/state/soil-settings';
 import { WeatherCard } from './src/components/WeatherCard';
 import { DeviceConnection } from './src/components/DeviceConnection';
+import { PumpControl } from './src/components/PumpControl';
 
 // 'Chat' is a full-screen route opened from the Advisor page, not a tab-bar entry.
-export type Tab = 'Overview' | 'Trends' | 'Advisor' | 'Device' | 'Chat';
+export type Tab = 'Overview' | 'Trends' | 'Advisor' | 'Pump' | 'Device' | 'Chat';
 
 const color = {
   bg: '#F6F7F1',
@@ -46,6 +47,7 @@ const tabs: [Tab, string][] = [
   ['Overview', '⌂'],
   ['Trends', '▥'],
   ['Advisor', '✦'],
+  ['Pump', '≋'],
   ['Device', '◉'],
 ];
 
@@ -571,6 +573,7 @@ export default function App({
             | '/advisor'
             | '/trends'
             | '/device'
+            | '/pump'
     );
   // Chat is pushed on top of the current screen so back returns where you came from.
   const openChat = () => router.push('/chat');
@@ -758,6 +761,8 @@ export default function App({
             demo={demo}
             stale={stale}
           />
+        ) : tab === 'Pump' ? (
+          <PumpControl />
         ) : (
           <Device
             reading={reading}
