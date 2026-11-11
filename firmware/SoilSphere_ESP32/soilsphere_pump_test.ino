@@ -36,9 +36,51 @@
   #define PUMP_PIN_A 7     // MOSFET driver "In" (or H-bridge IN1) - EXT1 pin 7
   #define PUMP_PIN_B 14    // H-bridge IN2 only, unused for now   - EXT1 pin 20
 
-  const unsigned long PUMP_RUN_MS  = 3000;  // how long each direction runs
-  const unsigned long PUMP_STOP_MS = 2000;  // pause after each run
-  const int PUMP_TEST_CYCLES = 3;           // 0 = repeat forever
+  // ========================
+  // Auto-watering
+  // ========================
+  // Waters for PUMP_RUN_MS whenever moisture drops below MOISTURE_THRESHOLD_PERCENT.
+  const float MOISTURE_THRESHOLD_PERCENT = 50.0f;
+  const unsigned long PUMP_RUN_MS = 5000;        // run the pump for 5 seconds
+  // Water takes time to soak down to the probe. Without this wait the next reading
+  // (3 s later) still looks dry and the pump would keep re-triggering and flood the pot.
+  const unsigned long PUMP_COOLDOWN_MS = 60000;  // wait 60 s after watering before re-checking
+  const int DRY_READINGS_REQUIRED = 2;           // ignore a single noisy low reading
+  const int MAX_WATERINGS_PER_HOUR = 6;          // hard cap if the probe is dry/out of soil
+  const int MOISTURE_FAULT_RAW = 3500;           // above this, assume the probe is disconnected
+
+  // ========================
+  // Moisture calibration (same as SoilSphere_ESP32.ino)
+  // ========================
+  // Raw ADC readings from our experiments:
+  //
+  // Dry soil:         2254 -> 0%
+  // Medium soil:      1776 -> 25%
+  // Wet soil:         1046 -> 50%
+  // Waterlogged soil:    0 -> 100%
+  //
+  // These percentages represent relative
+  // moisture, NOT volumetric water content.
+
+  const int MOISTURE_DRY = 2254;
+  const int MOISTURE_MEDIUM = 1776;
+  const int MOISTURE_WET = 1046;
+  const int MOISTURE_WATERLOGGED = 0;
+
+  // Convert raw ADC reading to moisture %
+  float calculateMoisturePercent(int raw) {
+    if (raw >= MOISTURE_DRY) return 0.0f;
+    if (raw >= MOISTURE_MEDIUM) {
+      return 25.0f * (MOISTURE_DRY - raw) / (MOISTURE_DRY - MOISTURE_MEDIUM);
+    }
+    if (raw >= MOISTURE_WET) {
+      return 25.0f + 25.0f * (MOISTURE_MEDIUM - raw) / (MOISTURE_MEDIUM - MOISTURE_WET);
+    }
+    if (raw > MOISTURE_WATERLOGGED) {
+      return 50.0f + 50.0f * (MOISTURE_WET - raw) / (MOISTURE_WET - MOISTURE_WATERLOGGED);
+    }
+    return 100.0f;
+  }
 
   // ========================
   // Sensors
@@ -60,6 +102,15 @@
   float oxygenLevel = NAN;
 
   int moistureRaw = 0;
+  float moisturePercent = 0.0f;
+
+  // Auto-watering state
+  volatile bool pumpRunning = false;
+  unsigned long lastWateringEnded = 0;
+  bool hasWatered = false;
+  int dryReadingCount = 0;
+  unsigned long wateringTimes[MAX_WATERINGS_PER_HOUR] = {0};
+  int wateringIndex = 0;
 
   int nitrogen = -1;
   int phosphorus = -1;
@@ -220,11 +271,16 @@
     Serial.print(oxygenLevel, 2);
     Serial.println(" %");
 
-    // Soil moisture (RAW)
+    // Soil moisture
     moistureRaw = analogRead(MOISTURE_PIN);
+    moisturePercent = calculateMoisturePercent(moistureRaw);
 
     Serial.print("Soil Moisture Raw: ");
     Serial.println(moistureRaw);
+
+    Serial.print("Soil Moisture: ");
+    Serial.print(moisturePercent, 1);
+    Serial.println(" %");
 
     // NPK with up to 3 attempts
     uint16_t n, p, k;
@@ -295,6 +351,12 @@
     json += ",\"moistureRaw\":";
     json += String(moistureRaw);
 
+    json += ",\"moisturePercent\":";
+    json += String(moisturePercent, 1);
+
+    json += ",\"pumpRunning\":";
+    json += pumpRunning ? "true" : "false";
+
     json += ",\"nitrogen\":";
     json += npkValid ? String(nitrogen) : "null";
 
@@ -338,35 +400,63 @@
   #endif
   }
 
-  // Runs as its own task, so the sensor reads and the web server
-  // keep working while the pump test is going.
-  void pumpTestTask(void *param) {
-    for (int cycle = 1;
-         PUMP_TEST_CYCLES == 0 || cycle <= PUMP_TEST_CYCLES;
-         cycle++) {
-      Serial.printf("[pump] cycle %d: forward\n", cycle);
-      pumpForward();
-      vTaskDelay(pdMS_TO_TICKS(PUMP_RUN_MS));
+  // Runs as its own task so the run is exactly PUMP_RUN_MS even while
+  // updateSensors() is blocked on slow NPK retries, and the web server keeps working.
+  void wateringTask(void *param) {
+    Serial.printf("[pump] ON for %lu ms\n", PUMP_RUN_MS);
+    pumpForward();
+    vTaskDelay(pdMS_TO_TICKS(PUMP_RUN_MS));
+    pumpStop();
+    Serial.println("[pump] OFF");
+    lastWateringEnded = millis();
+    pumpRunning = false;
+    vTaskDelete(NULL);
+  }
 
-      Serial.println("[pump] stop");
-      pumpStop();
-      vTaskDelay(pdMS_TO_TICKS(PUMP_STOP_MS));
+  int wateringsInLastHour() {
+    int count = 0;
+    for (int i = 0; i < MAX_WATERINGS_PER_HOUR; i++) {
+      if (wateringTimes[i] != 0 && millis() - wateringTimes[i] < 3600000UL) count++;
+    }
+    return count;
+  }
 
-      if (pumpReverse()) {
-        Serial.println("[pump] reverse");
-      } else {
-        Serial.println("[pump] reverse skipped: MOSFET driver is one direction only");
-      }
-      vTaskDelay(pdMS_TO_TICKS(PUMP_RUN_MS));
+  // Called after each sensor update.
+  void checkAutoWatering() {
+    if (pumpRunning) return;
 
-      Serial.println("[pump] stop");
-      pumpStop();
-      vTaskDelay(pdMS_TO_TICKS(PUMP_STOP_MS));
+    if (moistureRaw > MOISTURE_FAULT_RAW) {
+      dryReadingCount = 0;
+      Serial.println("[pump] moisture probe reading out of range - not watering");
+      return;
     }
 
-    pumpStop();
-    Serial.println("[pump] test done, pump off");
-    vTaskDelete(NULL);
+    if (moisturePercent >= MOISTURE_THRESHOLD_PERCENT) {
+      dryReadingCount = 0;
+      return;
+    }
+
+    dryReadingCount++;
+    if (dryReadingCount < DRY_READINGS_REQUIRED) return;
+
+    if (hasWatered && millis() - lastWateringEnded < PUMP_COOLDOWN_MS) {
+      Serial.println("[pump] dry, but waiting for the last watering to soak in");
+      return;
+    }
+
+    if (wateringsInLastHour() >= MAX_WATERINGS_PER_HOUR) {
+      Serial.println("[pump] hourly watering limit reached - check the probe and the pot");
+      return;
+    }
+
+    Serial.printf("[pump] moisture %.1f%% < %.0f%% - watering\n",
+                  moisturePercent, MOISTURE_THRESHOLD_PERCENT);
+    pumpRunning = true;
+    hasWatered = true;
+    dryReadingCount = 0;
+    wateringTimes[wateringIndex] = millis();
+    wateringIndex = (wateringIndex + 1) % MAX_WATERINGS_PER_HOUR;
+    xTaskCreate(wateringTask, "watering", 4096, NULL, 1, NULL);
   }
 
   // ========================
@@ -385,9 +475,6 @@
     delay(2000);
 
     Serial.println("Starting SoilSphere...");
-
-    // Pump test (NEW): starts now and runs alongside everything below
-    xTaskCreate(pumpTestTask, "pumpTest", 4096, NULL, 1, NULL);
 
     // I2C
     Wire.begin(SDA_PIN, SCL_PIN);
@@ -476,5 +563,6 @@
     if (millis() - lastSensorUpdate >= sensorInterval) {
       lastSensorUpdate = millis();
       updateSensors();
+      checkAutoWatering();
     }
   }

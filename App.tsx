@@ -1,5 +1,5 @@
 
-import { ReactElement, useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Keyboard,
@@ -14,10 +14,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { askAdvisor, fetchReadings } from './src/api';
-import { ChatMessage, demoReadings, display, SensorReading } from './src/data';
+import { fetchReadings } from './src/api';
+import { demoReadings, display, SensorReading } from './src/data';
 import { getInsights } from './src/recommendations';
-import { useRouter } from 'expo-router';
+import { useIsFocused, useRouter } from 'expo-router';
+import { useChat } from './src/state/chat';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { ModelPanel } from './src/components/ModelPanel';
@@ -27,7 +28,8 @@ import { useSoilSettings } from './src/state/soil-settings';
 import { WeatherCard } from './src/components/WeatherCard';
 import { DeviceConnection } from './src/components/DeviceConnection';
 
-export type Tab = 'Overview' | 'Trends' | 'Advisor' | 'Device' | 'Model';
+// 'Chat' is a full-screen route opened from the Advisor page, not a tab-bar entry.
+export type Tab = 'Overview' | 'Trends' | 'Advisor' | 'Device' | 'Chat';
 
 const color = {
   bg: '#F6F7F1',
@@ -44,7 +46,6 @@ const tabs: [Tab, string][] = [
   ['Overview', '⌂'],
   ['Trends', '▥'],
   ['Advisor', '✦'],
-  ['Model', '◈'],
   ['Device', '◉'],
 ];
 
@@ -324,12 +325,14 @@ function Trends({ readings }: { readings: SensorReading[] }) {
         values={readings.map((r) => r.potassiumMgKg)}
         tint="#E3B47E"
       />
+
       <TrendCard
-        label={readings.at(-1)?.moistureCalibrationId ? 'Relative moisture' : 'Moisture (raw ADC)'}
-        unit={readings.at(-1)?.moistureCalibrationId ? '%' : 'ADC'}
-        values={readings.map((r) => r.moistureCalibrationId ? r.moisturePercent : r.moistureRaw ?? null)}
+        label="Relative soil moisture"
+        unit="%"
+        values={readings.map((r) => r.moisturePercent)}
         tint="#6EA8B2"
       />
+
 
       <Card>
         <Text style={s.cardTitle}>Reading history</Text>
@@ -352,15 +355,35 @@ function Trends({ readings }: { readings: SensorReading[] }) {
 }
 
 function Advisor({
+  reading,
   readings,
-  refreshControl,
+  demo,
+  stale,
 }: {
+  reading: SensorReading;
   readings: SensorReading[];
-  refreshControl: ReactElement<React.ComponentProps<typeof RefreshControl>>;
+  demo: boolean;
+  stale: boolean;
 }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  return (
+    <>
+      <Heading title="Current observations" />
+      {getInsights(readings).map((insight) => (
+        <Card key={insight.title} style={{ marginBottom: 9 }}>
+          <Text style={s.cardTitle}>{insight.title}</Text>
+          <Text style={s.help}>{insight.detail}</Text>
+        </Card>
+      ))}
+
+      <Heading title="Models" note="Runs offline on your phone" />
+      <ModelPanel reading={reading} demo={demo} stale={stale} />
+    </>
+  );
+}
+
+function Chat({ readings }: { readings: SensorReading[] }) {
+  const { messages, busy, send: sendMessage } = useChat();
   const [draft, setDraft] = useState('');
-  const [busy, setBusy] = useState(false);
   const scroll = useRef<ScrollViewInstance>(null);
 
   // Keep the newest message in view when replies arrive or the keyboard opens.
@@ -376,34 +399,10 @@ function Advisor({
     return () => sub.remove();
   }, [scrollToEnd]);
 
-  async function send(text = draft) {
-    const prompt = text.trim();
-    if (!prompt || busy) return;
-
+  function send(text = draft) {
+    if (!text.trim() || busy) return;
     setDraft('');
-    const history = messages;
-
-    setMessages([...history, { role: 'user', content: prompt }]);
-    setBusy(true);
-
-    try {
-      const reply = await askAdvisor(prompt, history, readings);
-      setMessages((current) => [
-        ...current,
-        { role: 'assistant', content: reply },
-      ]);
-    } catch (e) {
-      setMessages((current) => [
-        ...current,
-        {
-          role: 'assistant',
-          content:
-            e instanceof Error ? e.message : 'Advisor unavailable',
-        },
-      ]);
-    } finally {
-      setBusy(false);
-    }
+    void sendMessage(text, readings);
   }
 
   return (
@@ -412,28 +411,16 @@ function Advisor({
         ref={scroll}
         style={{ flex: 1 }}
         contentContainerStyle={s.content}
-        refreshControl={refreshControl}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
       >
-      <Text style={s.pageLabel}>Advisor</Text>
-
-      <View style={s.advisorHero}>
+      <View style={[s.advisorHero, { marginTop: 12 }]}>
         <Text style={s.advisorStar}>✦</Text>
-        <Text style={s.advisorTitle}>Ask SoilSphere</Text>
         <Text style={s.advisorBody}>
           Plain language answers grounded in your latest readings.
           Guidance is not a lab soil test.
         </Text>
       </View>
-
-      <Heading title="Current observations" />
-      {getInsights(readings).map((insight) => (
-        <Card key={insight.title} style={{ marginBottom: 9 }}>
-          <Text style={s.cardTitle}>{insight.title}</Text>
-          <Text style={s.help}>{insight.detail}</Text>
-        </Card>
-      ))}
 
       <Heading title="Suggested questions" />
       {[
@@ -586,8 +573,12 @@ export default function App({
             | '/advisor'
             | '/trends'
             | '/device'
-            | '/model'
     );
+  // Chat is pushed on top of the current screen so back returns where you came from.
+  const openChat = () => router.push('/chat');
+  const closeChat = () => (router.canGoBack() ? router.back() : go('Advisor'));
+  // The Advisor screen stays mounted under the chat; only the visible screen polls the sensor.
+  const focused = useIsFocused();
 
   const [readings, setReadings] =
     useState<SensorReading[]>(demoReadings);
@@ -629,6 +620,7 @@ export default function App({
   // Automatic refresh: updates sensor data without showing
   // the pull-to-refresh indicator or reloading the screen.
   useEffect(() => {
+    if (!focused) return;
     let active = true;
     let loading = false;
 
@@ -673,7 +665,7 @@ export default function App({
       active = false;
       clearInterval(timer);
     };
-  }, [settings.deviceUrl]);
+  }, [settings.deviceUrl, focused]);
 
   // Hide the tab bar while typing so the input sits directly above the keyboard.
   const [keyboardOpen, setKeyboardOpen] = useState(false);
@@ -708,15 +700,30 @@ export default function App({
       <StatusBar style="dark" />
 
       <View style={s.top}>
-        <View style={s.logoRow}>
-          <View style={s.logoMark}>
-            <Text style={s.logoStar}>✦</Text>
+        {tab === 'Chat' ? (
+          <View style={s.logoRow}>
+            <TouchableOpacity
+              style={s.back}
+              onPress={closeChat}
+              accessibilityRole="button"
+              accessibilityLabel="Back to Advisor"
+              hitSlop={10}
+            >
+              <Text style={s.backText}>←</Text>
+            </TouchableOpacity>
+            <Text style={s.chatTitle}>Ask SoilSphere</Text>
           </View>
-          <Text style={s.logo}>
-            soilsphere
-            <Text style={{ color: color.green }}>.</Text>
-          </Text>
-        </View>
+        ) : (
+          <View style={s.logoRow}>
+            <View style={s.logoMark}>
+              <Text style={s.logoStar}>✦</Text>
+            </View>
+            <Text style={s.logo}>
+              soilsphere
+              <Text style={{ color: color.green }}>.</Text>
+            </Text>
+          </View>
+        )}
         <Text style={s.topState}>
           {demo ? '● Preview' : stale ? '● Last reading' : '● Connected'}
         </Text>
@@ -726,12 +733,13 @@ export default function App({
         style={{ flex: 1 }}
         behavior="padding"
       >
-      {tab === 'Advisor' ? (
-        <Advisor readings={calibrated} refreshControl={refreshControl} />
+      {tab === 'Chat' ? (
+        <Chat readings={calibrated} />
       ) : (
+      <View style={{ flex: 1 }}>
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={s.content}
+        contentContainerStyle={[s.content, tab === 'Advisor' && s.fabClearance]}
         refreshControl={refreshControl}
         keyboardShouldPersistTaps="handled"
       >
@@ -741,12 +749,17 @@ export default function App({
           <Overview
             reading={reading}
             demo={demo}
-            onAdvisor={() => go('Advisor')}
+            onAdvisor={openChat}
           />
         ) : tab === 'Trends' ? (
           <Trends readings={calibrated} />
-        ) : tab === 'Model' ? (
-          <ModelPanel reading={reading} demo={demo} stale={stale} />
+        ) : tab === 'Advisor' ? (
+          <Advisor
+            reading={reading}
+            readings={calibrated}
+            demo={demo}
+            stale={stale}
+          />
         ) : (
           <Device
             reading={reading}
@@ -757,9 +770,21 @@ export default function App({
           />
         )}
       </ScrollView>
+
+      {tab === 'Advisor' && !keyboardOpen && (
+        <TouchableOpacity
+          style={s.fab}
+          onPress={openChat}
+          accessibilityRole="button"
+          accessibilityLabel="Open advisor chat"
+        >
+          <Text style={s.fabIcon}>💬</Text>
+        </TouchableOpacity>
+      )}
+      </View>
       )}
 
-      {!keyboardOpen && (
+      {!keyboardOpen && tab !== 'Chat' && (
       <SafeAreaView edges={['bottom']} style={s.tabbar}>
         {tabs.map(([name, icon]) => (
           <TouchableOpacity
@@ -1077,11 +1102,47 @@ const s = StyleSheet.create({
     color: color.green,
     fontSize: 30,
   },
-  advisorTitle: {
-    color: color.ink,
-    fontSize: 23,
+  back: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: color.pale,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backText: {
+    color: color.green,
+    fontSize: 20,
     fontWeight: '800',
-    marginTop: 7,
+  },
+  chatTitle: {
+    color: color.ink,
+    fontSize: 19,
+    fontWeight: '800',
+    marginLeft: 4,
+  },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 18,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: color.green,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  fabIcon: {
+    fontSize: 26,
+  },
+  // Room at the end of the Advisor page so the chat button never covers the last control.
+  fabClearance: {
+    paddingBottom: 96,
   },
   advisorBody: {
     color: '#607568',
