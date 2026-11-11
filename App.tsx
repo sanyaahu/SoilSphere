@@ -327,12 +327,14 @@ function Trends({ readings }: { readings: SensorReading[] }) {
         values={readings.map((r) => r.potassiumMgKg)}
         tint="#E3B47E"
       />
+
       <TrendCard
-        label={readings.at(-1)?.moistureCalibrationId ? 'Relative moisture' : 'Moisture (raw ADC)'}
-        unit={readings.at(-1)?.moistureCalibrationId ? '%' : 'ADC'}
-        values={readings.map((r) => r.moistureCalibrationId ? r.moisturePercent : r.moistureRaw ?? null)}
+        label="Relative soil moisture"
+        unit="%"
+        values={readings.map((r) => r.moisturePercent)}
         tint="#6EA8B2"
       />
+
 
       <Card>
         <Text style={s.cardTitle}>Reading history</Text>

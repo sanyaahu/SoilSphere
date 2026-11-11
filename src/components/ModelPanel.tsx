@@ -47,7 +47,7 @@ function HealthDemoPanel({ reading, demo, stale }: { reading: SensorReading; dem
       <Text style={s.small}>{example.note} This is an example, not your current soil.</Text>
     </> : <>
       <Text style={s.body}>{demo ? 'No live sensor connected.' : stale ? 'Sensor connection needs refreshing.' : `${reading.deviceId} · ${new Date(reading.timestamp).toLocaleString()}`}</Text>
-      <Text style={s.small}>Uses your device’s calibrated dry-to-wet scale. Its equivalence to the experiment’s original calibration is unverified.</Text>
+      <Text style={s.small}>{reading.moistureCalibrationId ? 'Uses your saved app moisture calibration.' : 'Uses the moisture percentage reported by your device, including 0%.'} Its equivalence to the experiment’s original scale is unverified.</Text>
     </>}
     {!!issue && <Text style={s.warning} accessibilityLiveRegion="polite">{issue}</Text>}
     {input && <Text style={s.body}>Moisture {display(input.moisture as number, 1)}% · N {display(input.nitrogen as number)} · P {display(input.phosphorus as number)} · K {display(input.potassium as number)} mg/kg</Text>}

@@ -16,8 +16,11 @@ export const healthExamples: { name: string; input: ModelInput; note: string }[]
 export function healthSensorInput(reading: SensorReading, calibration: MoistureCalibration | null, demo: boolean, stale: boolean): ModelInput {
   if (demo) throw new Error('Connect your sensor to compare a live reading. Examples work without a device.');
   if (stale) throw new Error('Connection lost. Refresh your sensor before comparing.');
-  if (!calibration || calibration.deviceId !== reading.deviceId || reading.moistureCalibrationId !== calibration.id) {
-    throw new Error('Calibrate moisture for this device in Device before comparing.');
+  if (reading.moistureCalibrationId && (!calibration || calibration.deviceId !== reading.deviceId || reading.moistureCalibrationId !== calibration.id)) {
+    throw new Error('The saved moisture calibration does not match this reading. Refresh the sensor or check Device.');
+  }
+  if (reading.moisturePercent == null) {
+    throw new Error('Waiting for a moisture percentage from the device. If it only sends raw ADC readings, calibrate moisture in Device.');
   }
   const input: ModelInput = { moisture: reading.moisturePercent, nitrogen: reading.nitrogenMgKg, phosphorus: reading.phosphorusMgKg, potassium: reading.potassiumMgKg };
   for (const [feature, value] of Object.entries(input)) {
