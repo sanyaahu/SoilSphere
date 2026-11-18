@@ -5,6 +5,10 @@ export function predictFertilizer(model: ForestModel, input: ModelInput) {
   const warnings: string[] = [];
   for (const feature of model.numericFeatures) {
     const value = input[feature];
+    if (value == null && model.optionalFeatures?.includes(feature)) {
+      encoded.push(NaN);
+      continue;
+    }
     if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`Missing measurement: ${feature}`);
     const percentageInput = model.task === 'fertilizer' && (feature === 'humidity' || feature === 'moisture');
     if (percentageInput && (value < 0 || value > 100)) throw new Error(`${feature} must be between 0 and 100%.`);
@@ -21,7 +25,13 @@ export function predictFertilizer(model: ForestModel, input: ModelInput) {
   for (const tree of model.trees) {
     let node = 0;
     while (tree.left[node] !== -1) {
-      node = encoded[tree.feature[node]] <= tree.threshold[node] ? tree.left[node] : tree.right[node];
+      const value = encoded[tree.feature[node]];
+      if (Number.isNaN(value)) {
+        if (!tree.missingGoToLeft) throw new Error('Model does not support missing measurements.');
+        node = tree.missingGoToLeft[node] === 1 ? tree.left[node] : tree.right[node];
+      } else {
+        node = value <= tree.threshold[node] ? tree.left[node] : tree.right[node];
+      }
     }
     const total = tree.values[node].reduce((sum, value) => sum + value, 0);
     tree.values[node].forEach((value, i) => { scores[i] += value / total / model.trees.length; });
@@ -31,5 +41,5 @@ export function predictFertilizer(model: ForestModel, input: ModelInput) {
 }
 
 export function missingInputs(model: ForestModel, input: ModelInput): string[] {
-  return model.numericFeatures.filter(feature => typeof input[feature] !== 'number' || !Number.isFinite(input[feature]));
+  return model.numericFeatures.filter(feature => !(input[feature] == null && model.optionalFeatures?.includes(feature)) && (typeof input[feature] !== 'number' || !Number.isFinite(input[feature])));
 }

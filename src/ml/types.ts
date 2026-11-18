@@ -3,12 +3,13 @@ export type ForestModel = {
   task: 'fertilizer' | 'health';
   classes: string[];
   numericFeatures: string[];
+  optionalFeatures?: string[];
   categories: Record<string, string[]>;
   ranges: Record<string, { min: number; max: number }>;
   demoOnly?: boolean;
   units?: Record<string, string>;
   moistureCalibrationId?: string;
-  trees: { left: number[]; right: number[]; feature: number[]; threshold: number[]; values: number[][] }[];
+  trees: { left: number[]; right: number[]; feature: number[]; threshold: number[]; values: number[][]; missingGoToLeft?: number[] }[];
   metrics: { rows: number; testRows: number; testAccuracy: number | null; cvAccuracy: number | null };
 };
 

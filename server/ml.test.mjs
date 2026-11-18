@@ -16,12 +16,12 @@ const sensor = { nitrogen: 37, phosphorus: 0, potassium: 0, moistureRaw: 450, te
 const reading = mapEsp32Reading(sensor, '2026-11-04T12:00:00Z');
 const details = { sampleId: 'pot-01', condition: 'reference', label: '', labelBasis: '', split: 'train' };
 
-test('health demo matches Python on all 26 rows and always returns one of the three requested labels', () => {
+test('health demo matches Python on all 46 old and new rows and returns one of three labels', () => {
   const health = load('../src/ml/health-model.json');
   const fixtures = load('../ml/artifacts/health_demo_parity.json');
   assert.equal(health.demoOnly, true);
   assert.equal(health.metrics.testAccuracy, null);
-  assert.equal(fixtures.length, 26);
+  assert.equal(fixtures.length, 46);
   assert.deepEqual([...health.classes].sort(), ['could_be_better', 'healthy', 'unhealthy']);
   for (const fixture of fixtures) {
     const actual = predictFertilizer(health, fixture.input);
@@ -30,6 +30,39 @@ test('health demo matches Python on all 26 rows and always returns one of the th
     actual.scores.forEach((value, index) => assert.ok(Math.abs(value - fixture.scores[index]) < 1e-10));
   }
   for (const example of healthExamples) assert.ok(healthLabels[predictFertilizer(health, example.input).prediction]);
+});
+
+test('health training labels follow table corners, remaining perimeter, and interior cells', () => {
+  const fixtures = load('../ml/artifacts/health_demo_parity.json');
+  const counts = { healthy: 0, unhealthy: 0, could_be_better: 0 };
+  for (const row of fixtures) {
+    const outerRow = row.fertilizerTbsp === 0 || row.fertilizerTbsp === 3;
+    const outerColumn = ['dry', 'waterlogged'].includes(row.waterTreatment);
+    const expected = outerRow && outerColumn ? 'unhealthy' : outerRow || outerColumn ? 'could_be_better' : 'healthy';
+    assert.equal(row.assignedLabel, expected);
+    counts[expected]++;
+  }
+  assert.deepEqual(counts, { healthy: 15, unhealthy: 8, could_be_better: 23 });
+});
+
+test('combined model preserves all original rows and learns missing oxygen routes without filling oxygen values', () => {
+  const health = load('../src/ml/health-model.json');
+  const fixtures = load('../ml/artifacts/health_demo_parity.json');
+  assert.equal(fixtures.filter(row => row.batchId === 'original-table').length, 26);
+  assert.equal(fixtures.filter(row => row.batchId !== 'original-table').length, 20);
+  assert.equal(fixtures.filter(row => row.input.oxygen !== null).length, 9);
+  assert.equal(fixtures.filter(row => row.input.oxygen === null).length, 37);
+  assert.deepEqual(health.optionalFeatures, ['oxygen']);
+  for (const fixture of load('../ml/artifacts/health_demo_missing_oxygen_parity.json')) {
+    const actual = predictFertilizer(health, fixture.input);
+    assert.equal(actual.prediction, fixture.prediction);
+    actual.scores.forEach((score, index) => assert.ok(Math.abs(score - fixture.scores[index]) < 1e-10));
+  }
+  const noOxygen = healthSensorInput({ ...reading, moisturePercent: 0, oxygenPercent: null }, null, false, false);
+  assert.equal(noOxygen.oxygen, null);
+  assert.ok(healthLabels[predictFertilizer(health, noOxygen).prediction]);
+  assert.throws(() => healthSensorInput({ ...reading, moisturePercent: 50, oxygenPercent: NaN }, null, false, false), /Waiting for oxygen/);
+  assert.throws(() => predictFertilizer(health, { ...noOxygen, nitrogen: null }), /Missing measurement: nitrogen/);
 });
 
 test('health live comparison requires current calibrated complete measurements and preserves zero nutrients', () => {

@@ -40,7 +40,7 @@ function HealthDemoPanel({ reading, demo, stale }: { reading: SensorReading; dem
   }
   return <View style={s.card}>
     <Text style={s.heading}>Soil-condition model</Text>
-    <Text style={s.body}>Moisture and NPK combine into Healthy, Could be better, or Unhealthy. These describe our experimental conditions; plant health has not been independently validated.</Text>
+    <Text style={s.body}>Moisture, NPK, and soil oxygen when available combine into Healthy, Could be better, or Unhealthy. These describe our experimental conditions; plant health has not been independently validated.</Text>
     <Choices values={['Examples', 'My sensors']} selected={source} onChange={setSource} />
     {source === 'Examples' ? <>
       <Choices values={healthExamples.map(item => item.name)} selected={selected} onChange={setSelected} />
@@ -49,18 +49,16 @@ function HealthDemoPanel({ reading, demo, stale }: { reading: SensorReading; dem
       <Text style={s.body}>{demo ? 'No live sensor connected.' : stale ? 'Sensor connection needs refreshing.' : `${reading.deviceId} · ${new Date(reading.timestamp).toLocaleString()}`}</Text>
       <Text style={s.small}>{reading.moistureCalibrationId ? 'Uses your saved app moisture calibration.' : 'Uses the moisture percentage reported by your device, including 0%.'} Its equivalence to the experiment’s original scale is unverified.</Text>
     </>}
-    {!!issue && <Text style={s.warning} accessibilityLiveRegion="polite">{issue}</Text>}
+    {!!issue && <Text style={s.body} accessibilityLiveRegion="polite">{issue}</Text>}
     {input && <Text style={s.body}>Moisture {display(input.moisture as number, 1)}% · N {display(input.nitrogen as number)} · P {display(input.phosphorus as number)} · K {display(input.potassium as number)} mg/kg</Text>}
+    {input && <Text style={s.small}>Soil oxygen: {input.oxygen == null ? 'not measured — comparison uses the available inputs.' : `${display(input.oxygen as number, 2)}%`}</Text>}
     {result && <View style={s.result} accessibilityLiveRegion="polite">
       <Text style={s.kicker}>{source === 'Examples' ? 'EXAMPLE RESULT' : 'EXPERIMENTAL LIVE COMPARISON'}</Text>
       <Text style={s.prediction}>{healthLabels[result.prediction] ?? 'Could be better'}</Text>
       <Text style={s.body}>{result.prediction === 'healthy' ? 'Most similar to the demo’s acceptable conditions.' : result.prediction === 'unhealthy' ? 'Most similar to the demo’s stressed conditions.' : 'Most similar to the demo’s intermediate conditions.'}</Text>
-      <Text style={s.small}>Demo target: 40–60% moisture with the 1–2 tbsp experimental treatment. Fertilizer amounts are experiment context, not application advice.</Text>
-      {input && (input.moisture as number) < 40 && <Text style={s.warning}>Moisture is below the experiment’s target range.</Text>}
-      {input && (input.moisture as number) > 60 && <Text style={s.warning}>Moisture is above the experiment’s target range.</Text>}
-      {result.warnings.map(warning => <Text style={s.warning} key={warning}>{warning}</Text>)}
+      <Text style={s.small}>Training labels follow the experiment table: corners Unhealthy, other outer edges Could be better, and interior cells Healthy. Fertilizer amounts describe the experiment, not application advice.</Text>
     </View>}
-    <Text style={s.small}>26 experimental NPK readings; 16 moisture values were synthetic. Labels follow assumed treatment rules. Real-world accuracy is not established. Results are never saved as training labels automatically.</Text>
+    <Text style={s.small}>46 experimental readings across two tables; 16 original moisture values were synthetic. Oxygen was measured in 9 readings; missing oxygen stays missing. Labels follow assumed treatment rules. Real-world accuracy is not established. Results are never saved as training labels automatically.</Text>
   </View>;
 }
 
@@ -141,7 +139,7 @@ export function ModelPanel({ reading, demo, stale }: { reading: SensorReading; d
           </View>
         </View>
         <Text style={s.small}>These SCD30 readings supply the model’s temperature and humidity inputs. CO₂ ppm is excluded.</Text>
-        {!!missing.length && <Text style={s.warning}>Still needed: {missing.join(', ')}.{missing.includes('moisture') ? ' Calibrate moisture in Device.' : ' Waiting for these measurements.'}</Text>}
+        {!!missing.length && <Text style={s.body}>Still needed: {missing.join(', ')}.{missing.includes('moisture') ? ' Waiting for a device percentage or app moisture calibration.' : ' Waiting for these measurements.'}</Text>}
         <Text style={s.body}>Sensor NPK uses mg/kg. The public dataset does not document its measurement method; this comparison is experimental.</Text>
       </> : <Text style={s.body}>Public-data example: N 37 · P 0 · K 0 · moisture 38 · 26°C · humidity 52 · Sandy soil. These are not your sensor readings.</Text>}
       <TouchableOpacity style={s.button} onPress={runModel} accessibilityRole="button"><Text style={s.buttonText}>{source === 'Dataset example' ? 'Run model example' : 'Run experimental comparison'}</Text></TouchableOpacity>
@@ -150,7 +148,7 @@ export function ModelPanel({ reading, demo, stale }: { reading: SensorReading; d
         <Text style={s.prediction}>{result.prediction}</Text>
         <Text style={s.small}>{resultTimestamp}</Text>
         <Text style={s.body}>Fertilizer class suggestion. Soil health and nutrient excess are not assessed.</Text>
-        {result.warnings.map(warning => <Text style={s.warning} key={warning}>{warning}</Text>)}
+        {result.warnings.map(warning => <Text style={s.small} key={warning}>{warning}</Text>)}
       </View>}
       <Text style={s.small}>{model.metrics.testAccuracy === null ? 'Unmeasured' : `${(model.metrics.testAccuracy * 100).toFixed(1)}%`} accuracy on {model.metrics.testRows} reserved public examples · {((model.metrics.cvAccuracy ?? 0) * 100).toFixed(1)}% cross-validation average. Sensor accuracy is unverified.</Text>
     </View>
@@ -174,7 +172,7 @@ export function ModelPanel({ reading, demo, stale }: { reading: SensorReading; d
       <Text style={s.small}>Leave labels empty until assessed. Fertilizer predictions never become health labels automatically.</Text>
     </View>
     {!!notice && <Text style={s.notice} accessibilityLiveRegion="polite">{notice}</Text>}
-    {!!settings.error && <Text style={s.warning}>{settings.error}</Text>}
+    {!!settings.error && <Text style={s.body}>{settings.error}</Text>}
   </>;
 }
 

@@ -1,0 +1,129 @@
+{
+  "task": "synthetic_grid_label_agreement_NOT_plant_health_accuracy",
+  "rows_by_batch": {
+    "original-table": 26,
+    "table-upload-2026-11-17": 20
+  },
+  "measured_oxygen_rows": 9,
+  "missing_oxygen_rows": 37,
+  "original_file_sha256": {
+    "readings_review.csv": "a5566bc45bd56c02e0215e7ca1e0829cd3d617ee69e4d22e8b3b1ac3be2700d8",
+    "synthetic_demo_training.csv": "3a33aa8aa35a4db2975dd40456057c5c8978d3d009c34fdd004960d0af291174",
+    "real_measurements_pending.csv": "bbbf9a28695cfe9f4ea05e47a3ede2ac82ba338c009f23785fa99e1ffd36b9a8"
+  },
+  "label_counts": {
+    "unhealthy": 8,
+    "could_be_better": 23,
+    "healthy": 15
+  },
+  "training_pots": [
+    "pdf-pot-01",
+    "pdf-pot-02",
+    "pdf-pot-03",
+    "pdf-pot-05",
+    "pdf-pot-06",
+    "pdf-pot-07",
+    "pdf-pot-08",
+    "pdf-pot-10",
+    "pdf-pot-12",
+    "pdf-pot-13",
+    "pdf-pot-14",
+    "pdf-pot-16",
+    "pdf-pot-17",
+    "pdf-pot-19",
+    "pdf-pot-22",
+    "pdf-pot-23",
+    "pdf-pot-25",
+    "pdf-pot-26",
+    "batch2-pot-01",
+    "batch2-pot-02",
+    "batch2-pot-03",
+    "batch2-pot-05",
+    "batch2-pot-06",
+    "batch2-pot-07",
+    "batch2-pot-08",
+    "batch2-pot-10",
+    "batch2-pot-12",
+    "batch2-pot-13",
+    "batch2-pot-15",
+    "batch2-pot-17",
+    "batch2-pot-19",
+    "batch2-pot-20"
+  ],
+  "test_pots": [
+    "pdf-pot-04",
+    "pdf-pot-09",
+    "pdf-pot-11",
+    "pdf-pot-15",
+    "pdf-pot-18",
+    "pdf-pot-20",
+    "pdf-pot-21",
+    "pdf-pot-24",
+    "batch2-pot-04",
+    "batch2-pot-09",
+    "batch2-pot-11",
+    "batch2-pot-14",
+    "batch2-pot-16",
+    "batch2-pot-18"
+  ],
+  "demo_test_agreement": {
+    "accuracy": 0.2857142857142857,
+    "balanced_accuracy": 0.20952380952380953,
+    "class_order": [
+      "could_be_better",
+      "healthy",
+      "unhealthy"
+    ],
+    "confusion_matrix": [
+      [
+        3,
+        3,
+        1
+      ],
+      [
+        4,
+        1,
+        0
+      ],
+      [
+        2,
+        0,
+        0
+      ]
+    ],
+    "per_class": {
+      "could_be_better": {
+        "precision": 0.3333333333333333,
+        "recall": 0.42857142857142855,
+        "f1-score": 0.375,
+        "support": 7.0
+      },
+      "healthy": {
+        "precision": 0.25,
+        "recall": 0.2,
+        "f1-score": 0.2222222222222222,
+        "support": 5.0
+      },
+      "unhealthy": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1-score": 0.0,
+        "support": 2.0
+      },
+      "accuracy": 0.2857142857142857,
+      "macro avg": {
+        "precision": 0.19444444444444442,
+        "recall": 0.20952380952380953,
+        "f1-score": 0.19907407407407407,
+        "support": 14.0
+      },
+      "weighted avg": {
+        "precision": 0.25595238095238093,
+        "recall": 0.2857142857142857,
+        "f1-score": 0.26686507936507936,
+        "support": 14.0
+      }
+    }
+  },
+  "note": "Synthetic/proxy agreement only. Physical pot independence across experiments and shared moisture calibration are not verified. Do not present as real-world health accuracy."
+}
