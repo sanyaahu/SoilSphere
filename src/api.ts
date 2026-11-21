@@ -80,3 +80,52 @@ export async function askAdvisor(message: string, history: ChatMessage[], readin
   const summary = `Latest NPK estimates: N ${reading.nitrogenMgKg ?? 'unavailable'}, P ${reading.phosphorusMgKg ?? 'unavailable'}, K ${reading.potassiumMgKg ?? 'unavailable'} mg/kg.`;
   return `${summary} ${getInsights([reading])[0].detail}`;
 }
+
+
+const SUPABASE_URL = 'https://smclkzpequcadbearvwp.supabase.co';
+
+const SUPABASE_ANON_KEY =
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+export async function fetchSensorHistory(days = 7): Promise<SensorReading[]> {
+  if (!SUPABASE_ANON_KEY) {
+    throw new Error('Missing Supabase anon key');
+  }
+
+  const since = new Date(
+    Date.now() - days * 24 * 60 * 60 * 1000
+  ).toISOString();
+
+  const url =
+    `${SUPABASE_URL}/rest/v1/sensor_readings` +
+    `?select=*&recorded_at=gte.${encodeURIComponent(since)}` +
+    `&order=recorded_at.asc&limit=2000`;
+
+  const response = await fetch(url, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Supabase history request failed: ${response.status}`);
+  }
+
+  const rows = await response.json();
+
+  return rows.map((row: any): SensorReading => ({
+    deviceId: row.device_id,
+    timestamp: row.recorded_at,
+    co2Ppm: row.co2,
+    temperatureC: row.temperature,
+    humidityPercent: row.humidity,
+    lightLux: row.lux,
+    oxygenPercent: row.oxygen,
+    moistureRaw: row.moisture_raw,
+    moisturePercent: row.moisture_percent,
+    nitrogenMgKg: row.nitrogen,
+    phosphorusMgKg: row.phosphorus,
+    potassiumMgKg: row.potassium,
+    batteryPercent: null,
+  }));
+}

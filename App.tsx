@@ -14,7 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { fetchReadings } from './src/api';
+import { fetchReadings, fetchSensorHistory } from './src/api';
 import { demoReadings, display, SensorReading } from './src/data';
 import { getInsights } from './src/recommendations';
 import { useIsFocused, useRouter } from 'expo-router';
@@ -259,22 +259,25 @@ function TrendCard({
   values: (number | null)[];
   tint: string;
 }) {
-  const nums = values.filter((v): v is number => v !== null);
-  const min = Math.min(...nums);
-  const max = Math.max(...nums);
+  // Keep the chart legible even when seven days contain hundreds of readings.
+  const step = Math.max(1, Math.ceil(values.length / 36));
+  const chartValues = values.filter((_, i) => i % step === 0 || i === values.length - 1);
+  const nums = chartValues.filter((v): v is number => v !== null && Number.isFinite(v));
+  const min = nums.length ? Math.min(...nums) : 0;
+  const max = nums.length ? Math.max(...nums) : 0;
+  const latest = [...values].reverse().find((v) => v !== null && Number.isFinite(v));
 
   return (
     <Card style={{ marginBottom: 12 }}>
       <View style={s.between}>
         <Text style={s.cardTitle}>{label}</Text>
         <Text style={s.trendValue}>
-          {display(values[values.length - 1])}{' '}
+          {display(latest ?? null)}{' '}
           <Text style={s.unit}>{unit}</Text>
         </Text>
       </View>
-
       <View style={s.bars}>
-        {values.map((v, i) => (
+        {chartValues.map((v, i) => (
           <View key={i} style={s.barSlot}>
             <View
               style={[
@@ -282,20 +285,15 @@ function TrendCard({
                 {
                   backgroundColor: tint,
                   height:
-                    v === null
+                    v === null || !Number.isFinite(v)
                       ? 4
-                      : 18 +
-                        (max === min
-                          ? 0.5
-                          : (v - min) / (max - min)) *
-                          56,
+                      : 18 + (max === min ? 0.5 : (v - min) / (max - min)) * 56,
                 },
               ]}
             />
           </View>
         ))}
       </View>
-
       <View style={s.between}>
         <Text style={s.small}>Earlier</Text>
         <Text style={s.small}>Latest</Text>
@@ -305,53 +303,118 @@ function TrendCard({
 }
 
 function Trends({ readings }: { readings: SensorReading[] }) {
+  const [days, setDays] = useState<1 | 3 | 7>(7);
+  const [history, setHistory] = useState<SensorReading[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    fetchSensorHistory(days)
+      .then((data) => {
+        if (active) setHistory(data);
+      })
+      .catch((err) => {
+        if (active) {
+          setHistory([]);
+          setError(err instanceof Error ? err.message : 'Could not load history');
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [days, reload]);
+
+  const trendReadings = history;
+  const metrics: { label: string; unit: string; tint: string; get: (r: SensorReading) => number | null | undefined }[] = [
+    { label: 'Nitrogen', unit: 'mg/kg', tint: '#79A66D', get: r => r.nitrogenMgKg },
+    { label: 'Phosphorus', unit: 'mg/kg', tint: '#9AA9D3', get: r => r.phosphorusMgKg },
+    { label: 'Potassium', unit: 'mg/kg', tint: '#E3B47E', get: r => r.potassiumMgKg },
+    { label: 'Soil moisture', unit: '%', tint: '#6EA8B2', get: r => r.moisturePercent },
+    { label: 'CO₂', unit: 'ppm', tint: '#85A7A0', get: r => r.co2Ppm },
+    { label: 'Oxygen', unit: '%', tint: '#91B4D2', get: r => r.oxygenPercent },
+    { label: 'Temperature', unit: '°C', tint: '#D8A078', get: r => r.temperatureC },
+    { label: 'Humidity', unit: '%', tint: '#9F9ACF', get: r => r.humidityPercent },
+    { label: 'Light exposure', unit: 'lux', tint: '#D6C16E', get: r => r.lightLux },
+  ];
+
   return (
     <>
-      <Heading title="Recent trends" note="Your last measurements" />
+      <Heading title="Historical trends" note="Saved sensor averages from Supabase" />
+      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
+        {([1, 3, 7] as const).map((range) => (
+          <TouchableOpacity
+            key={range}
+            onPress={() => setDays(range)}
+            accessibilityRole="button"
+            style={{
+              flex: 1, paddingVertical: 11, borderRadius: 12, alignItems: 'center',
+              backgroundColor: days === range ? color.green : color.white,
+              borderWidth: 1, borderColor: days === range ? color.green : color.line,
+            }}
+          >
+            <Text style={{ fontWeight: '700', color: days === range ? '#fff' : color.ink }}>
+              {range === 1 ? '24 hours' : `${range} days`}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
-      <TrendCard
-        label="Nitrogen"
-        unit="mg/kg"
-        values={readings.map((r) => r.nitrogenMgKg)}
-        tint="#79A66D"
-      />
-      <TrendCard
-        label="Phosphorus"
-        unit="mg/kg"
-        values={readings.map((r) => r.phosphorusMgKg)}
-        tint="#9AA9D3"
-      />
-      <TrendCard
-        label="Potassium"
-        unit="mg/kg"
-        values={readings.map((r) => r.potassiumMgKg)}
-        tint="#E3B47E"
-      />
-
-      <TrendCard
-        label="Relative soil moisture"
-        unit="%"
-        values={readings.map((r) => r.moisturePercent)}
-        tint="#6EA8B2"
-      />
-
-
-      <Card>
-        <Text style={s.cardTitle}>Reading history</Text>
-        {readings
-          .slice()
-          .reverse()
-          .map((r, i) => (
-            <View key={r.timestamp + i} style={s.history}>
-              <Text style={s.small}>{fmtTime(r.timestamp)}</Text>
-              <Text style={s.historyText}>
-                N {display(r.nitrogenMgKg)} · P{' '}
-                {display(r.phosphorusMgKg)} · K{' '}
-                {display(r.potassiumMgKg)}
-              </Text>
-            </View>
+      {loading ? (
+        <ActivityIndicator color={color.green} style={{ marginVertical: 30 }} />
+      ) : error ? (
+        <Card>
+          <Text style={s.error}>{error}</Text>
+          <TouchableOpacity style={s.refresh} onPress={() => setReload(v => v + 1)}>
+            <Text style={s.refreshText}>Retry history</Text>
+          </TouchableOpacity>
+        </Card>
+      ) : trendReadings.length === 0 ? (
+        <Card>
+          <Text style={s.cardTitle}>No saved readings yet</Text>
+          <Text style={s.help}>
+            Once the ESP32 starts uploading sensor averages, your history will appear here.
+          </Text>
+          <TouchableOpacity style={s.refresh} onPress={() => setReload(v => v + 1)}>
+            <Text style={s.refreshText}>Refresh history</Text>
+          </TouchableOpacity>
+        </Card>
+      ) : (
+        <>
+          <Text style={[s.small, { marginBottom: 12 }]}>
+            {trendReadings.length} saved reading{trendReadings.length === 1 ? '' : 's'} · {fmtTime(trendReadings[0].timestamp)} – {fmtTime(trendReadings[trendReadings.length - 1].timestamp)}
+          </Text>
+          {metrics.map((metric) => (
+            <TrendCard
+              key={metric.label}
+              label={metric.label}
+              unit={metric.unit}
+              tint={metric.tint}
+              values={trendReadings.map(r => metric.get(r) ?? null)}
+            />
           ))}
-      </Card>
+          <Card>
+            <View style={s.between}>
+              <Text style={s.cardTitle}>Recent saved readings</Text>
+              <TouchableOpacity onPress={() => setReload(v => v + 1)}>
+                <Text style={{ color: color.green, fontWeight: '700' }}>Refresh</Text>
+              </TouchableOpacity>
+            </View>
+            {trendReadings.slice(-20).reverse().map((r, i) => (
+              <View key={r.timestamp + i} style={s.history}>
+                <Text style={s.small}>{fmtTime(r.timestamp)}</Text>
+                <Text style={s.historyText}>
+                  N {display(r.nitrogenMgKg)} · P {display(r.phosphorusMgKg)} · K {display(r.potassiumMgKg)} mg/kg
+                </Text>
+              </View>
+            ))}
+          </Card>
+        </>
+      )}
     </>
   );
 }
