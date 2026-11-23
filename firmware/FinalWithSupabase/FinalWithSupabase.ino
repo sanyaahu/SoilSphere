@@ -7,6 +7,8 @@
 #include <Adafruit_SCD30.h>
 #include <Adafruit_VEML7700.h>
 #include "DFRobot_OxygenSensor.h"
+#include <LittleFS.h>
+#include <time.h>
 #include "secrets.h"
 
 // ========================
@@ -16,6 +18,18 @@ const char* ssid = "CMU-DEVICE";
 
 const char* UPLOAD_URL =
   "https://smclkzpequcadbearvwp.supabase.co/functions/v1/upload-sensor-reading";
+
+// Wi-Fi watchdog: check every 30 s, reconnect if dropped, restart the board if still
+// offline after 10 min. Readings that could not be uploaded are kept in flash (below),
+// so a restart doesn't lose them.
+const unsigned long WIFI_CHECK_MS = 30UL * 1000UL;
+const unsigned long WIFI_RESTART_AFTER_MS = 10UL * 60UL * 1000UL;
+
+// Offline storage: readings that fail to upload are appended to this file in flash
+// and re-sent (oldest first) once Wi-Fi and Supabase are reachable again.
+const char* PENDING_FILE = "/pending.jsonl";
+const size_t PENDING_MAX_BYTES = 512UL * 1024UL;  // ~2000 readings, about 2 weeks at 10 min
+const int PENDING_UPLOADS_PER_PASS = 10;          // keep loop() responsive while catching up
 
 // ========================
 // Pins
@@ -38,7 +52,7 @@ const char* UPLOAD_URL =
 #define PUMP_PIN 7
 
 // Auto-watering: pump runs while moisture is below the threshold, stops once it's at or above.
-const float MOISTURE_THRESHOLD_PERCENT = 50.0f;
+const float MOISTURE_THRESHOLD_PERCENT = 5.0f;
 const int MOISTURE_FAULT_RAW = 3500;  // above this the probe is likely disconnected: don't pump
 
 // Manual control from the app's hold-to-run button (Pump tab).
@@ -200,14 +214,122 @@ void collectHistorySample() {
   }
 }
 
-void uploadHistoryAverages() {
-  if (historySampleCount == 0) return;
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[history] Wi-Fi offline; this window cannot be uploaded");
+// ========================
+// Clock (NTP) for reading timestamps
+// ========================
+// Readings saved while offline are uploaded later, so each one carries the time it was
+// measured. The clock is set from the internet once Wi-Fi connects and keeps running after.
+bool clockIsSet() {
+  return time(nullptr) > 1700000000;  // any time after Nov 2023 means NTP has synced
+}
+
+String isoTimestamp(time_t t) {
+  struct tm utc;
+  gmtime_r(&t, &utc);
+  char buf[25];
+  strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &utc);
+  return String(buf);
+}
+
+// ========================
+// Uploading + offline storage
+// ========================
+// Returns the HTTP status, or a negative number if the request couldn't be sent.
+int postReading(const String& json) {
+  if (WiFi.status() != WL_CONNECTED) return -1;
+  WiFiClientSecure client;
+  // PROTOTYPE ONLY: TLS encryption without server certificate validation.
+  // Replace with a trusted root CA certificate before production deployment.
+  client.setInsecure();
+  HTTPClient http;
+  http.setTimeout(5000);
+  if (!http.begin(client, UPLOAD_URL)) return -2;
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("x-device-token", SOILSPHERE_DEVICE_TOKEN);
+  int status = http.POST(json);
+  if (status < 200 || status >= 300) {
+    Serial.printf("[history] Upload HTTP status: %d %s\n", status, http.getString().c_str());
+  }
+  http.end();
+  return status;
+}
+
+// 4xx other than auth/rate-limit means Supabase rejected this reading itself; retrying
+// would never succeed and would block everything queued behind it.
+bool rejectedForGood(int status) {
+  return status >= 400 && status < 500 && status != 401 && status != 403 &&
+         status != 408 && status != 429;
+}
+
+void savePending(const String& json) {
+  File f = LittleFS.open(PENDING_FILE, FILE_APPEND);
+  if (!f) {
+    Serial.println("[offline] Could not open storage - reading lost");
     return;
   }
+  if (f.size() + json.length() + 1 > PENDING_MAX_BYTES) {
+    f.close();
+    Serial.println("[offline] Storage full - reading lost");
+    return;
+  }
+  f.println(json);
+  f.close();
+  Serial.println("[offline] Saved reading to flash; will upload when back online");
+}
+
+bool hasPending() {
+  if (!LittleFS.exists(PENDING_FILE)) return false;
+  File f = LittleFS.open(PENDING_FILE, FILE_READ);
+  bool any = f && f.size() > 0;
+  if (f) f.close();
+  return any;
+}
+
+// Re-sends up to PENDING_UPLOADS_PER_PASS saved readings, oldest first.
+// Stops at the first temporary failure so the order is kept.
+void uploadPending() {
+  if (WiFi.status() != WL_CONNECTED || !hasPending()) return;
+
+  File in = LittleFS.open(PENDING_FILE, FILE_READ);
+  File out = LittleFS.open("/pending.tmp", FILE_WRITE);
+  if (!in || !out) {
+    if (in) in.close();
+    if (out) out.close();
+    return;
+  }
+
+  int sent = 0, attempts = 0;
+  bool stopped = false;
+  while (in.available()) {
+    String line = in.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) continue;
+    if (stopped || attempts >= PENDING_UPLOADS_PER_PASS) {
+      out.println(line);  // keep for the next pass
+      continue;
+    }
+    attempts++;
+    int status = postReading(line);
+    if (status >= 200 && status < 300) {
+      sent++;
+    } else if (rejectedForGood(status)) {
+      Serial.println("[offline] Supabase rejected a saved reading; skipping it");
+    } else {
+      out.println(line);
+      stopped = true;  // offline or server problem: try again later
+    }
+  }
+  in.close();
+  out.close();
+  LittleFS.remove(PENDING_FILE);
+  LittleFS.rename("/pending.tmp", PENDING_FILE);
+  if (sent > 0) Serial.printf("[offline] Uploaded %d saved reading(s)\n", sent);
+}
+
+void uploadHistoryAverages() {
+  if (historySampleCount == 0) return;
   if (String(SOILSPHERE_DEVICE_TOKEN).startsWith("PASTE_")) {
-    Serial.println("[history] Set SOILSPHERE_DEVICE_TOKEN before uploading");
+    Serial.println("[history] Set SOILSPHERE_DEVICE_TOKEN in secrets.h before uploading");
     return;
   }
 
@@ -223,24 +345,57 @@ void uploadHistoryAverages() {
   json += ",\"phosphorus\":" + avgPhosphorus.json();
   json += ",\"potassium\":" + avgPotassium.json();
   json += ",\"sample_count\":" + String(historySampleCount);
+  // When the measurement happened. Without a synced clock (no Wi-Fi since boot) it's
+  // omitted and Supabase stamps the reading with its upload time instead.
+  if (clockIsSet()) json += ",\"recorded_at\":\"" + isoTimestamp(time(nullptr)) + "\"";
   json += "}";
 
-  WiFiClientSecure client;
-  // PROTOTYPE ONLY: TLS encryption without server certificate validation.
-  // Replace with a trusted root CA certificate before production deployment.
-  client.setInsecure();
-  HTTPClient http;
-  http.setTimeout(5000);
-  if (!http.begin(client, UPLOAD_URL)) {
-    Serial.println("[history] Could not start HTTPS request");
+  // Send any backlog first so readings arrive oldest-first.
+  uploadPending();
+  if (hasPending()) {  // still behind (or offline): queue this one after the backlog
+    savePending(json);
     return;
   }
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("x-device-token", SOILSPHERE_DEVICE_TOKEN);
-  int status = http.POST(json);
-  Serial.printf("[history] Upload HTTP status: %d\n", status);
-  if (status != 200) Serial.println(http.getString());
-  http.end();
+  int status = postReading(json);
+  if (status >= 200 && status < 300) {
+    Serial.printf("[history] Uploaded (HTTP %d)\n", status);
+  } else if (rejectedForGood(status)) {
+    Serial.println("[history] Supabase rejected this reading; not saving it");
+  } else {
+    savePending(json);
+  }
+}
+
+// ========================
+// Wi-Fi watchdog
+// ========================
+unsigned long lastWifiCheck = 0;
+unsigned long wifiOfflineSince = 0;  // 0 = currently online
+
+void checkWifi() {
+  if (millis() - lastWifiCheck < WIFI_CHECK_MS) return;
+  lastWifiCheck = millis();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    if (wifiOfflineSince != 0) {
+      Serial.print("[wifi] Reconnected, IP address: ");
+      Serial.println(WiFi.localIP());
+      wifiOfflineSince = 0;
+    }
+    uploadPending();  // catch up on anything saved while offline
+    return;
+  }
+
+  if (wifiOfflineSince == 0) wifiOfflineSince = millis();
+  unsigned long offlineFor = millis() - wifiOfflineSince;
+  if (offlineFor >= WIFI_RESTART_AFTER_MS) {
+    Serial.println("[wifi] Offline for 10 minutes - restarting the board");
+    delay(200);
+    ESP.restart();  // saved readings survive in flash
+  }
+  Serial.printf("[wifi] Offline for %lus - reconnecting\n", offlineFor / 1000);
+  WiFi.disconnect();
+  WiFi.begin(ssid);
 }
 
 
@@ -559,7 +714,7 @@ void handlePumpOn() {
   sendPumpState(200);
 }
 
-// POST /pump/off - release the button. The pump keeps running only if moisture is below 50%.
+// POST /pump/off - release the button. The pump keeps running only if moisture is below the threshold.
 void handlePumpOff() {
   if (manualPumpOn) {
     manualPumpOn = false;
@@ -632,9 +787,21 @@ void setup() {
 
   Serial.println("NPK RS485 initialized!");
 
+  // Flash storage for readings saved while offline (formats on first use)
+  if (LittleFS.begin(true)) {
+    Serial.println(hasPending() ? "[offline] Found saved readings from before the restart"
+                                : "Offline storage ready");
+  } else {
+    Serial.println("ERROR: flash storage unavailable - offline readings will be lost");
+  }
+
   // Wi-Fi
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(ssid);
+  // UTC clock from the internet, used to timestamp readings. Syncs in the background
+  // whenever Wi-Fi is up.
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 
   Serial.print("Connecting to Wi-Fi");
 
@@ -680,6 +847,7 @@ void setup() {
 // ========================
 void loop() {
   server.handleClient();
+  checkWifi();
 
   if (millis() - lastSensorUpdate >= sensorInterval) {
     lastSensorUpdate = millis();

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSoilSettings } from '../state/soil-settings';
 
-// Talks to firmware/SoilSphere_ESP32/SoilSphere_ESP32.ino (pump on pin 7):
+// Talks to firmware/FinalWithSupabase/FinalWithSupabase.ino (pump on pin 7):
 //   POST /pump/on  - run for another 2 s (the firmware's MANUAL_LEASE_MS)
 //   POST /pump/off - stop now
 // While the button is held we re-send /pump/on every RENEW_MS. If that stops (finger lifted
@@ -17,7 +17,7 @@ async function pumpRequest(deviceUrl: string, action: 'on' | 'off') {
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(`${deviceUrl}/pump/${action}`, { method: 'POST', signal: controller.signal });
-    if (response.status === 404) throw new Error('This ESP32 has no pump routes. Upload the latest SoilSphere_ESP32.ino to it.');
+    if (response.status === 404) throw new Error('This ESP32 has no pump routes. Upload the latest FinalWithSupabase.ino to it.');
     if (!response.ok) throw new Error(`ESP32 replied with an error (${response.status}).`);
   } catch (e) {
     if (e instanceof Error && e.name === 'AbortError') throw new Error(`ESP32 did not respond at ${deviceUrl}. Check the address on the Device tab.`);
@@ -99,8 +99,8 @@ export function PumpControl() {
       <Text style={p.small} selectable>Device: {deviceUrl}</Text>
       <Text style={p.small}>
         Safety: the pump also stops by itself about 2 seconds after the app stops talking to it.
-        Needs the latest SoilSphere_ESP32.ino on the board; change its address on the Device tab.
-        The board also runs the pump on its own whenever moisture is below 50%.
+        Needs the latest FinalWithSupabase.ino on the board; change its address on the Device tab.
+        The board also runs the pump on its own whenever moisture is below 5%.
       </Text>
     </View>
   );
